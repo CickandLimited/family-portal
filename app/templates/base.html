@@ -4,11 +4,16 @@
     <meta charset="utf-8" />
     <title>{{ title or "Family Portal" }}</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@3.4.1/dist/tailwind.min.css" />
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/tailwindcss@3.4.1/dist/tailwind.min.css"
+    />
   </head>
   <body class="bg-slate-100 text-slate-900">
-    <main class="container mx-auto p-4">
+    <main class="container mx-auto p-6">
       {% block content %}{% endblock %}
     </main>
+    <script src="{{ url_for('static', path='js/htmx.min.js') }}"></script>
+    <script src="{{ url_for('static', path='js/alpine.min.js') }}"></script>
   </body>
 </html>
