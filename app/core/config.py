@@ -1,21 +1,19 @@
-"""Application configuration stubs."""
+"""Application configuration using environment-aware settings."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import os
+from pydantic import BaseSettings
 
 
-@dataclass(slots=True)
-class Settings:
-    """Placeholder settings container."""
+class Settings(BaseSettings):
+    """Runtime configuration pulled from environment variables."""
 
-    app_name: str = "Family Portal"
-    debug: bool = True
-
-
-def get_settings() -> Settings:
-    """Return default application settings."""
-    return Settings()
+    session_secret: str = os.environ.get("FP_SESSION_SECRET", "dev-secret-change-me")
+    db_url: str = os.environ.get("FP_DB_URL", "sqlite:///./family_portal.db")
+    uploads_dir: str = os.environ.get("FP_UPLOADS_DIR", "/var/lib/family-portal/uploads")
+    thumbs_dir: str = os.environ.get("FP_THUMBS_DIR", "/var/lib/family-portal/uploads/thumbs")
+    max_upload_mb: int = int(os.environ.get("FP_MAX_UPLOAD_MB", "6"))
 
 
-settings = get_settings()
+settings = Settings()
