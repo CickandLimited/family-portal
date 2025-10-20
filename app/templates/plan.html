@@ -8,7 +8,12 @@
   </style>
 
   <div
-    x-data="planView()"
+    x-data="planView({
+      activeModal: {{ active_modal | tojson }},
+      modalSubtaskId: {{ active_subtask_id | tojson }},
+      formErrors: {{ submission_errors | tojson }},
+      formData: {{ submission_form | tojson }}
+    })"
     @open-modal.window="openModal($event.detail)"
     @close-modal.window="closeModal()"
     @keyup.escape.window="closeModal()"
@@ -194,24 +199,96 @@
             ✕
           </button>
         </div>
-        <div class="mt-4 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-sm text-slate-500">
-          Submission form coming soon. This button will open the upload experience.
-        </div>
-        <div class="mt-6 flex justify-end gap-2">
-          <button
-            type="button"
-            class="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
-            @click="closeModal()"
-          >
-            Close
-          </button>
-          <button
-            type="button"
-            class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-indigo-500"
-          >
-            Launch Submission
-          </button>
-        </div>
+        <form
+          class="mt-6 space-y-5"
+          method="post"
+          action="{{ request.url_for('submit_subtask', plan_id=plan.id) }}"
+          enctype="multipart/form-data"
+        >
+          <template x-if="formErrors.length">
+            <div class="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
+              <ul class="list-disc space-y-1 pl-5">
+                <template x-for="(error, index) in formErrors" :key="index">
+                  <li x-text="error"></li>
+                </template>
+              </ul>
+            </div>
+          </template>
+
+          <input type="hidden" name="subtask_id" :value="modalSubtaskId ?? ''" />
+
+          <div class="space-y-2">
+            <label for="comment" class="text-sm font-medium text-slate-700">Comment</label>
+            <textarea
+              id="comment"
+              name="comment"
+              rows="3"
+              class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+              placeholder="What did you complete?"
+              x-model="formData.comment"
+            ></textarea>
+            <p class="text-xs text-slate-500">Optional: share a quick update about your progress.</p>
+          </div>
+
+          <div class="space-y-2">
+            <label for="user_id" class="text-sm font-medium text-slate-700">Who is submitting?</label>
+            <select
+              id="user_id"
+              name="user_id"
+              class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+              x-model="formData.user_id"
+            >
+              <option value="">Anonymous</option>
+              {% for option in identity_options %}
+                <option value="{{ option.id }}">{{ option.display_name }}</option>
+              {% endfor %}
+            </select>
+            <p class="text-xs text-slate-500">Optional: choose your name so reviewers know who submitted the update.</p>
+          </div>
+
+          <div class="space-y-2">
+            <label for="photo" class="text-sm font-medium text-slate-700">Upload photo</label>
+            <input
+              id="photo"
+              name="photo"
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+              required
+            />
+            <p class="text-xs text-slate-500">Images up to {{ max_upload_mb }} MB are supported (JPEG, PNG, or WEBP).</p>
+          </div>
+
+          <div class="flex justify-end gap-2">
+            <button
+              type="button"
+              class="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+              @click.prevent="closeModal()"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              class="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-indigo-500"
+            >
+              <svg
+                class="h-4 w-4"
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke-width="1.5"
+                stroke="currentColor"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  d="M7.5 12 10.5 15 16.5 9"
+                />
+              </svg>
+              Submit evidence
+            </button>
+          </div>
+        </form>
       </div>
     </div>
 
@@ -262,20 +339,36 @@
   </div>
 
   <script>
-    function planView() {
+    function planView(initial = {}) {
       return {
-        activeModal: null,
-        modalSubtaskId: null,
+        activeModal: initial.activeModal || null,
+        modalSubtaskId: initial.modalSubtaskId || null,
+        formErrors: initial.formErrors || [],
+        formData: {
+          comment: initial.formData?.comment || "",
+          user_id: initial.formData?.user_id || "",
+          subtask_id: initial.formData?.subtask_id || null,
+        },
         openModal(detail) {
           if (!detail) {
             return;
           }
           this.activeModal = detail.type || null;
           this.modalSubtaskId = detail.subtaskId || null;
+          if (this.activeModal === "submit") {
+            this.formErrors = [];
+            this.formData = {
+              comment: "",
+              user_id: "",
+              subtask_id: detail.subtaskId || null,
+            };
+          }
         },
         closeModal() {
           this.activeModal = null;
           this.modalSubtaskId = null;
+          this.formErrors = [];
+          this.formData = { comment: "", user_id: "", subtask_id: null };
         },
       };
     }
