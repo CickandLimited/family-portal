@@ -1,0 +1,17 @@
+Alembic migration helpers
+=========================
+
+Create a new revision based on model changes:
+
+```
+alembic revision --autogenerate -m "Short description"
+```
+
+Apply the latest migrations to the configured database:
+
+```
+alembic upgrade head
+```
+
+Both commands rely on ``FP_DB_URL`` (or the default SQLite path) and use the
+SQLModel metadata imported in ``alembic/env.py``.
