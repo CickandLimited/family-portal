@@ -1,10 +1,18 @@
-"""Database session management placeholders."""
+"""Database engine and session helpers."""
+
+from __future__ import annotations
 
 from collections.abc import Generator
-from contextlib import contextmanager
+
+from sqlmodel import Session, create_engine
+
+from app.core.config import settings
+
+_connect_args = {"check_same_thread": False} if settings.db_url.startswith("sqlite") else {}
+engine = create_engine(settings.db_url, connect_args=_connect_args)
 
 
-@contextmanager
-def get_session() -> Generator[None, None, None]:
-    """Placeholder context manager for database sessions."""
-    yield None
+def get_session() -> Generator[Session, None, None]:
+    """Yield a database session for dependency injection."""
+    with Session(engine) as session:
+        yield session

@@ -1,11 +1,18 @@
-"""Upload handling API stubs."""
+"""File upload endpoints."""
 
-from fastapi import APIRouter, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from sqlmodel import Session
 
-router = APIRouter(prefix="/uploads", tags=["uploads"])
+from app.core.db import get_session
+from app.core.imaging import process_image
+
+router = APIRouter(prefix="/upload")
 
 
-@router.post("/")
-async def upload_file(_: UploadFile) -> dict[str, str]:
-    """Placeholder upload endpoint."""
-    return {"status": "pending"}
+@router.post("")
+async def upload(file: UploadFile = File(...), session: Session = Depends(get_session)):
+    """Accept an image upload placeholder."""
+    if file.content_type not in {"image/jpeg", "image/png", "image/webp"}:
+        raise HTTPException(400, "Unsupported file type")
+    saved = await process_image(file)
+    return saved
