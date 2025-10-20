@@ -1,8 +1,283 @@
 {% extends "base.html" %}
 
 {% block content %}
-  <section class="space-y-4">
-    <h1 class="text-3xl font-bold">Plan Placeholder</h1>
-    <p class="text-slate-600">Plan details will be added to this template later.</p>
-  </section>
+  <style>
+    [x-cloak] {
+      display: none !important;
+    }
+  </style>
+
+  <div
+    x-data="planView()"
+    @open-modal.window="openModal($event.detail)"
+    @close-modal.window="closeModal()"
+    @keyup.escape.window="closeModal()"
+    class="space-y-6"
+  >
+    <section class="flex flex-col gap-4 rounded-2xl bg-white p-6 shadow">
+      <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p class="text-sm uppercase tracking-wide text-slate-500">Plan Overview</p>
+          <h1 class="text-3xl font-bold text-slate-900">{{ plan.title }}</h1>
+          {% if plan.assignee %}
+            <p class="text-slate-600">
+              Assigned to
+              <span class="font-semibold">{{ plan.assignee.display_name }}</span>
+            </p>
+          {% endif %}
+        </div>
+        <div class="flex flex-col items-start gap-2 sm:items-end">
+          <span
+            class="inline-flex items-center rounded-full px-3 py-1 text-sm font-semibold {{ plan.status_badge_class }}"
+          >
+            {{ plan.status_label }}
+          </span>
+          <p class="text-sm text-slate-500">
+            Updated {{ plan.updated_at.strftime('%b %d, %Y %I:%M %p') if plan.updated_at else 'recently' }}
+          </p>
+        </div>
+      </div>
+
+      <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div class="rounded-xl border border-slate-200 p-4">
+          <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Days Complete</p>
+          <p class="mt-2 text-2xl font-semibold text-slate-900">
+            {{ plan.completed_days }}
+            <span class="text-base font-medium text-slate-500">/ {{ plan.total_days }}</span>
+          </p>
+        </div>
+        <div class="rounded-xl border border-slate-200 p-4">
+          <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Subtasks Approved</p>
+          <p class="mt-2 text-2xl font-semibold text-slate-900">
+            {{ plan.completed_subtasks }}
+            <span class="text-base font-medium text-slate-500">/ {{ plan.total_subtasks }}</span>
+          </p>
+        </div>
+        <div class="rounded-xl border border-slate-200 p-4">
+          <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Plan Progress</p>
+          <p class="mt-2 text-2xl font-semibold text-slate-900">{{ plan.progress_percent }}%</p>
+        </div>
+        <div class="rounded-xl border border-slate-200 p-4">
+          <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Total XP</p>
+          <p class="mt-2 text-2xl font-semibold text-slate-900">{{ plan.total_xp }}</p>
+        </div>
+      </div>
+    </section>
+
+    {% if plan.attachments %}
+      <section class="space-y-3 rounded-2xl bg-white p-6 shadow">
+        <div class="flex items-center justify-between">
+          <h2 class="text-lg font-semibold text-slate-900">Plan Attachments</h2>
+          <p class="text-sm text-slate-500">Supporting files shared with the whole plan</p>
+        </div>
+        <ul class="space-y-2">
+          {% for attachment in plan.attachments %}
+            <li class="flex flex-col gap-2 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p class="font-medium text-slate-800">{{ attachment.file_name }}</p>
+                {% if attachment.uploaded_by %}
+                  <p class="text-sm text-slate-500">Uploaded by {{ attachment.uploaded_by }}</p>
+                {% endif %}
+              </div>
+              <div class="flex items-center gap-3 text-sm">
+                <a
+                  class="font-semibold text-indigo-600 hover:text-indigo-500"
+                  href="{{ attachment.file_path }}"
+                  target="_blank"
+                  rel="noopener"
+                >
+                  Open
+                </a>
+              </div>
+            </li>
+          {% endfor %}
+        </ul>
+      </section>
+    {% endif %}
+
+    <section class="space-y-4">
+      {% if plan.days %}
+        {% for day in plan.days %}
+          <div
+            x-data="{ open: {{ 'true' if not day.locked and loop.first else 'false' }}, locked: {{ 'true' if day.locked else 'false' }} }"
+            class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow"
+          >
+            <button
+              type="button"
+              class="flex w-full items-center justify-between gap-4 p-5 text-left transition"
+              :class="locked ? 'cursor-not-allowed opacity-60' : 'hover:bg-slate-50'"
+              @click="if (!locked) { open = !open }"
+            >
+              <div>
+                <p class="text-lg font-semibold text-slate-900">
+                  Day {{ day.index + 1 }} · {{ day.title }}
+                </p>
+                <p class="text-sm text-slate-500">
+                  {{ day.completed_subtasks }} of {{ day.total_subtasks }} subtasks complete
+                </p>
+              </div>
+              <div class="flex items-center gap-3">
+                {% if day.locked %}
+                  <span class="inline-flex items-center rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-700">
+                    Locked
+                  </span>
+                {% elif day.complete %}
+                  <span class="inline-flex items-center rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700">
+                    Complete
+                  </span>
+                {% else %}
+                  <span class="inline-flex items-center rounded-full bg-indigo-100 px-3 py-1 text-xs font-semibold text-indigo-700">
+                    In Progress
+                  </span>
+                {% endif %}
+                <svg
+                  class="h-5 w-5 text-slate-500 transition-transform"
+                  :class="open ? 'rotate-180' : 'rotate-0'"
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke-width="1.5"
+                  stroke="currentColor"
+                >
+                  <path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+                </svg>
+              </div>
+            </button>
+
+            {% if day.locked %}
+              <div class="border-t border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
+                Complete the previous day to unlock these subtasks.
+              </div>
+            {% endif %}
+
+            <div x-cloak x-show="open" class="border-t border-slate-200">
+              <ul class="divide-y divide-slate-200">
+                {% for subtask in day.subtasks %}
+                  {% include "components/subtask_item.html" with subtask=subtask, day_locked=day.locked %}
+                {% else %}
+                  <li class="p-5 text-sm text-slate-500">
+                    No subtasks scheduled for this day yet.
+                  </li>
+                {% endfor %}
+              </ul>
+            </div>
+          </div>
+        {% endfor %}
+      {% else %}
+        <div class="rounded-2xl border border-dashed border-slate-300 bg-white p-6 text-center text-slate-500">
+          This plan does not have any days yet.
+        </div>
+      {% endif %}
+    </section>
+
+    <div
+      x-cloak
+      x-show="activeModal === 'submit'"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4"
+      role="dialog"
+      aria-modal="true"
+    >
+      <div class="w-full max-w-lg rounded-2xl bg-white p-6 shadow-lg">
+        <div class="flex items-start justify-between">
+          <div>
+            <h3 class="text-xl font-semibold text-slate-900">Submit evidence</h3>
+            <p class="mt-1 text-sm text-slate-600">
+              Add a comment or photo for subtask #<span x-text="modalSubtaskId"></span>.
+            </p>
+          </div>
+          <button
+            type="button"
+            class="text-slate-400 transition hover:text-slate-600"
+            @click="closeModal()"
+            aria-label="Close submission modal"
+          >
+            ✕
+          </button>
+        </div>
+        <div class="mt-4 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-sm text-slate-500">
+          Submission form coming soon. This button will open the upload experience.
+        </div>
+        <div class="mt-6 flex justify-end gap-2">
+          <button
+            type="button"
+            class="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+            @click="closeModal()"
+          >
+            Close
+          </button>
+          <button
+            type="button"
+            class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-indigo-500"
+          >
+            Launch Submission
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div
+      x-cloak
+      x-show="activeModal === 'review'"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4"
+      role="dialog"
+      aria-modal="true"
+    >
+      <div class="w-full max-w-lg rounded-2xl bg-white p-6 shadow-lg">
+        <div class="flex items-start justify-between">
+          <div>
+            <h3 class="text-xl font-semibold text-slate-900">Review submission</h3>
+            <p class="mt-1 text-sm text-slate-600">
+              Approve or deny the latest evidence for subtask #<span x-text="modalSubtaskId"></span>.
+            </p>
+          </div>
+          <button
+            type="button"
+            class="text-slate-400 transition hover:text-slate-600"
+            @click="closeModal()"
+            aria-label="Close review modal"
+          >
+            ✕
+          </button>
+        </div>
+        <div class="mt-4 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-sm text-slate-500">
+          The review workflow will live here. Use the buttons above to open the full approval UI.
+        </div>
+        <div class="mt-6 flex justify-end gap-2">
+          <button
+            type="button"
+            class="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+            @click="closeModal()"
+          >
+            Close
+          </button>
+          <button
+            type="button"
+            class="rounded-md bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-emerald-500"
+          >
+            Launch Review
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function planView() {
+      return {
+        activeModal: null,
+        modalSubtaskId: null,
+        openModal(detail) {
+          if (!detail) {
+            return;
+          }
+          this.activeModal = detail.type || null;
+          this.modalSubtaskId = detail.subtaskId || null;
+        },
+        closeModal() {
+          this.activeModal = null;
+          this.modalSubtaskId = null;
+        },
+      };
+    }
+  </script>
 {% endblock %}

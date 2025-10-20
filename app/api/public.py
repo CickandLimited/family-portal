@@ -1,16 +1,23 @@
 """Public-facing API routes for the Family Portal application."""
 
-from collections import defaultdict
+from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request
+from collections import defaultdict
+from typing import Any
+
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+from sqlalchemy.orm import selectinload
 from sqlmodel import Session, select
 
 from app.core.db import get_session
+from app.core.locking import refresh_plan_day_locks
 from app.core.xp import calculate_level
+from app.models.attachments import Attachment
 from app.models.devices import Device
 from app.models.plans import Plan, PlanStatus
+from app.models.tasks import PlanDay, Subtask, SubtaskStatus, SubtaskSubmission
 from app.models.users import User
 
 router = APIRouter()
@@ -145,7 +152,222 @@ def board(request: Request, session: Session = Depends(get_session)):
     )
 
 
+def _attachment_context(attachment: Attachment) -> dict[str, Any]:
+    uploaded_by: str | None = None
+    if attachment.uploaded_by_user:
+        uploaded_by = attachment.uploaded_by_user.display_name
+    elif attachment.uploaded_by_device:
+        uploaded_by = (
+            attachment.uploaded_by_device.friendly_name
+            or f"Device {attachment.uploaded_by_device.id}"
+        )
+
+    file_name = attachment.file_path.split("/")[-1]
+
+    return {
+        "id": attachment.id,
+        "file_name": file_name,
+        "file_path": attachment.file_path,
+        "thumb_path": attachment.thumb_path,
+        "uploaded_by": uploaded_by,
+        "created_at": attachment.created_at,
+    }
+
+
+def _submission_context(submission: SubtaskSubmission) -> dict[str, Any]:
+    actor: str | None = None
+    device: str | None = None
+
+    if submission.submitted_by_user:
+        actor = submission.submitted_by_user.display_name
+    if submission.submitted_by_device:
+        device = (
+            submission.submitted_by_device.friendly_name
+            or f"Device {submission.submitted_by_device.id}"
+        )
+
+    if actor and device:
+        submitted_by = f"{actor} via {device}"
+    elif actor:
+        submitted_by = actor
+    elif device:
+        submitted_by = device
+    else:
+        submitted_by = "Unknown submitter"
+
+    created_display = submission.created_at.strftime("%b %d, %Y %I:%M %p")
+
+    return {
+        "id": submission.id,
+        "submitted_by": submitted_by,
+        "created_at": submission.created_at,
+        "created_display": created_display,
+        "comment": submission.comment,
+        "photo_path": submission.photo_path,
+    }
+
+
+PLAN_STATUS_BADGES: dict[PlanStatus, str] = {
+    PlanStatus.DRAFT: "bg-slate-200 text-slate-700",
+    PlanStatus.IN_PROGRESS: "bg-blue-100 text-blue-700",
+    PlanStatus.COMPLETE: "bg-emerald-100 text-emerald-700",
+    PlanStatus.ARCHIVED: "bg-slate-200 text-slate-600",
+}
+
+
+SUBTASK_STATUS_BADGES: dict[SubtaskStatus, str] = {
+    SubtaskStatus.PENDING: "bg-slate-200 text-slate-700",
+    SubtaskStatus.SUBMITTED: "bg-indigo-100 text-indigo-700",
+    SubtaskStatus.APPROVED: "bg-emerald-100 text-emerald-700",
+    SubtaskStatus.DENIED: "bg-rose-100 text-rose-700",
+}
+
+
+def _build_plan_context(plan: Plan) -> dict[str, Any]:
+    days = sorted(plan.days, key=lambda day: day.day_index)
+
+    plan_attachments = [_attachment_context(attachment) for attachment in plan.attachments]
+
+    total_subtasks = 0
+    completed_subtasks = 0
+    day_contexts: list[dict[str, Any]] = []
+
+    for day in days:
+        subtasks = sorted(day.subtasks, key=lambda subtask: subtask.order_index)
+        subtask_contexts: list[dict[str, Any]] = []
+        day_completed = 0
+
+        for subtask in subtasks:
+            status_label = subtask.status.value.replace("_", " ").title()
+            submissions = sorted(
+                (_submission_context(submission) for submission in subtask.submissions),
+                key=lambda item: item["created_at"],
+                reverse=True,
+            )
+            attachments = [
+                _attachment_context(attachment) for attachment in subtask.attachments
+            ]
+
+            if subtask.status == SubtaskStatus.APPROVED:
+                day_completed += 1
+                completed_subtasks += 1
+
+            total_subtasks += 1
+
+            subtask_contexts.append(
+                {
+                    "id": subtask.id,
+                    "text": subtask.text,
+                    "xp_value": subtask.xp_value,
+                    "status": subtask.status.value,
+                    "status_label": status_label,
+                    "status_badge_class": SUBTASK_STATUS_BADGES[subtask.status],
+                    "submissions": submissions,
+                    "attachments": attachments,
+                    "can_submit": subtask.status in {SubtaskStatus.PENDING, SubtaskStatus.DENIED},
+                    "can_review": subtask.status == SubtaskStatus.SUBMITTED,
+                }
+            )
+
+        day_total = len(subtasks)
+        day_complete = day_completed == day_total
+        progress_percent = 100 if day_total == 0 else round((day_completed / day_total) * 100)
+
+        day_contexts.append(
+            {
+                "id": day.id,
+                "index": day.day_index,
+                "title": day.title,
+                "locked": day.locked,
+                "complete": day_complete,
+                "progress_percent": progress_percent,
+                "completed_subtasks": day_completed,
+                "total_subtasks": day_total,
+                "subtasks": subtask_contexts,
+            }
+        )
+
+    completed_days = sum(1 for day in day_contexts if day["complete"])
+    total_days = len(day_contexts)
+    progress_percent = 0
+    if total_subtasks:
+        progress_percent = round((completed_subtasks / total_subtasks) * 100)
+
+    assignee = None
+    if plan.assignee:
+        assignee = {
+            "id": plan.assignee.id,
+            "display_name": plan.assignee.display_name,
+            "avatar": plan.assignee.avatar,
+        }
+
+    return {
+        "id": plan.id,
+        "title": plan.title,
+        "status": plan.status.value,
+        "status_label": plan.status.value.replace("_", " ").title(),
+        "status_badge_class": PLAN_STATUS_BADGES[plan.status],
+        "total_xp": plan.total_xp,
+        "assignee": assignee,
+        "attachments": plan_attachments,
+        "days": day_contexts,
+        "completed_days": completed_days,
+        "total_days": total_days,
+        "completed_subtasks": completed_subtasks,
+        "total_subtasks": total_subtasks,
+        "progress_percent": progress_percent,
+        "updated_at": plan.updated_at,
+    }
+
+
 @router.get("/plan/{plan_id}", response_class=HTMLResponse)
 def view_plan(plan_id: int, request: Request, session: Session = Depends(get_session)):
-    """Render a placeholder plan detail view."""
-    return templates.TemplateResponse("plan.html", {"request": request, "plan_id": plan_id})
+    """Render the detailed plan view including days and subtasks."""
+
+    stmt = (
+        select(Plan)
+        .where(Plan.id == plan_id)
+        .options(
+            selectinload(Plan.assignee),
+            selectinload(Plan.attachments)
+            .selectinload(Attachment.uploaded_by_user),
+            selectinload(Plan.attachments)
+            .selectinload(Attachment.uploaded_by_device),
+            selectinload(Plan.days)
+            .selectinload(PlanDay.subtasks)
+            .selectinload(Subtask.submissions)
+            .selectinload(SubtaskSubmission.submitted_by_user),
+            selectinload(Plan.days)
+            .selectinload(PlanDay.subtasks)
+            .selectinload(Subtask.submissions)
+            .selectinload(SubtaskSubmission.submitted_by_device),
+            selectinload(Plan.days)
+            .selectinload(PlanDay.subtasks)
+            .selectinload(Subtask.attachments)
+            .selectinload(Attachment.uploaded_by_user),
+            selectinload(Plan.days)
+            .selectinload(PlanDay.subtasks)
+            .selectinload(Subtask.attachments)
+            .selectinload(Attachment.uploaded_by_device),
+        )
+    )
+
+    plan = session.exec(stmt).one_or_none()
+    if plan is None:
+        raise HTTPException(status_code=404, detail="Plan not found")
+
+    if refresh_plan_day_locks(plan):
+        session.add(plan)
+        session.commit()
+        plan = session.exec(stmt).one()
+
+    plan_context = _build_plan_context(plan)
+
+    return templates.TemplateResponse(
+        "plan.html",
+        {
+            "request": request,
+            "plan": plan_context,
+            "title": f"{plan_context['title']} • Plan",
+        },
+    )
