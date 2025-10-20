@@ -5,4 +5,26 @@
     <h1 class="text-3xl font-bold">Family Board</h1>
     <p class="text-slate-600">This placeholder view will display board data soon.</p>
   </section>
+  <section class="mt-8 rounded-lg bg-white p-4 shadow">
+    <h2 class="text-xl font-semibold text-slate-800">Device recognition</h2>
+    {% if device %}
+    <p class="mt-2 text-sm text-slate-600">
+      You are browsing as device <span class="font-mono text-slate-900">{{ device.id }}</span>.
+      {% if device.friendly_name %}
+        Saved name: <span class="font-semibold">{{ device.friendly_name }}</span>.
+      {% endif %}
+      {% if device.linked_user_id %}
+        Linked family member ID: <span class="font-semibold">{{ device.linked_user_id }}</span>.
+      {% endif %}
+    </p>
+    <p class="mt-2 text-xs text-slate-500">
+      Last seen {{ device.last_seen_at.strftime('%Y-%m-%d %H:%M:%S') if device.last_seen_at else 'recently' }} UTC.
+    </p>
+    {% else %}
+    <p class="mt-2 text-sm text-slate-600">
+      We are assigning this browser a device ID. Refresh if nothing appears in a few
+      seconds.
+    </p>
+    {% endif %}
+  </section>
 {% endblock %}

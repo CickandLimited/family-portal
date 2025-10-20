@@ -14,7 +14,15 @@ templates = Jinja2Templates(directory="app/templates")
 @router.get("/", response_class=HTMLResponse)
 def board(request: Request, session: Session = Depends(get_session)):
     """Render the main family board view."""
-    return templates.TemplateResponse("board.html", {"request": request, "data": {}})
+    device = getattr(request.state, "device", None)
+    return templates.TemplateResponse(
+        "board.html",
+        {
+            "request": request,
+            "data": {},
+            "device": device,
+        },
+    )
 
 
 @router.get("/plan/{plan_id}", response_class=HTMLResponse)
