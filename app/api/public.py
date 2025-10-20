@@ -3,22 +3,34 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    UploadFile,
+    status,
+)
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import selectinload
 from sqlmodel import Session, select
 
 from app.core.db import get_session
 from app.core.locking import refresh_plan_day_locks
+from app.core.config import settings
 from app.core.xp import calculate_level
 from app.models.attachments import Attachment
 from app.models.devices import Device
 from app.models.plans import Plan, PlanStatus
 from app.models.tasks import PlanDay, Subtask, SubtaskStatus, SubtaskSubmission
 from app.models.users import User
+from app.core.imaging import process_image
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
@@ -223,6 +235,92 @@ SUBTASK_STATUS_BADGES: dict[SubtaskStatus, str] = {
 }
 
 
+def _plan_detail_statement(plan_id: int):
+    """Return a select statement that eager-loads plan relationships."""
+
+    return (
+        select(Plan)
+        .where(Plan.id == plan_id)
+        .options(
+            selectinload(Plan.assignee),
+            selectinload(Plan.attachments).selectinload(Attachment.uploaded_by_user),
+            selectinload(Plan.attachments).selectinload(Attachment.uploaded_by_device),
+            selectinload(Plan.days)
+            .selectinload(PlanDay.subtasks)
+            .selectinload(Subtask.submissions)
+            .selectinload(SubtaskSubmission.submitted_by_user),
+            selectinload(Plan.days)
+            .selectinload(PlanDay.subtasks)
+            .selectinload(Subtask.submissions)
+            .selectinload(SubtaskSubmission.submitted_by_device),
+            selectinload(Plan.days)
+            .selectinload(PlanDay.subtasks)
+            .selectinload(Subtask.attachments)
+            .selectinload(Attachment.uploaded_by_user),
+            selectinload(Plan.days)
+            .selectinload(PlanDay.subtasks)
+            .selectinload(Subtask.attachments)
+            .selectinload(Attachment.uploaded_by_device),
+        )
+    )
+
+
+def _load_plan_for_render(session: Session, plan_id: int) -> Plan:
+    """Fetch a plan with all relationships and refresh locks if needed."""
+
+    stmt = _plan_detail_statement(plan_id)
+    plan = session.exec(stmt).one_or_none()
+    if plan is None:
+        raise HTTPException(status_code=404, detail="Plan not found")
+
+    if refresh_plan_day_locks(plan):
+        session.add(plan)
+        session.commit()
+        plan = session.exec(stmt).one()
+
+    return plan
+
+
+def _submission_identity_options(session: Session) -> list[dict[str, Any]]:
+    """Return active users for identity selection in submission forms."""
+
+    users = session.exec(
+        select(User).where(User.is_active.is_(True)).order_by(User.display_name)
+    ).all()
+    return [{"id": user.id, "display_name": user.display_name} for user in users]
+
+
+def _render_plan_page(
+    request: Request,
+    session: Session,
+    plan: Plan,
+    *,
+    status_code: int = 200,
+    active_modal: str | None = None,
+    active_subtask_id: int | None = None,
+    submission_errors: list[str] | None = None,
+    submission_form: dict[str, Any] | None = None,
+):
+    """Render the plan template with common context information."""
+
+    plan_context = _build_plan_context(plan)
+    identity_options = _submission_identity_options(session)
+    context = {
+        "request": request,
+        "plan": plan_context,
+        "title": f"{plan_context['title']} • Plan",
+        "identity_options": identity_options,
+        "max_upload_mb": settings.max_upload_mb,
+        "active_modal": active_modal,
+        "active_subtask_id": active_subtask_id,
+        "submission_errors": submission_errors or [],
+        "submission_form": submission_form
+        or {"comment": "", "user_id": "", "subtask_id": None},
+    }
+
+    return templates.TemplateResponse("plan.html", context, status_code=status_code)
+
+
 def _build_plan_context(plan: Plan) -> dict[str, Any]:
     days = sorted(plan.days, key=lambda day: day.day_index)
 
@@ -323,51 +421,165 @@ def _build_plan_context(plan: Plan) -> dict[str, Any]:
 @router.get("/plan/{plan_id}", response_class=HTMLResponse)
 def view_plan(plan_id: int, request: Request, session: Session = Depends(get_session)):
     """Render the detailed plan view including days and subtasks."""
+    plan = _load_plan_for_render(session, plan_id)
+    return _render_plan_page(request, session, plan)
 
-    stmt = (
-        select(Plan)
-        .where(Plan.id == plan_id)
-        .options(
-            selectinload(Plan.assignee),
-            selectinload(Plan.attachments)
-            .selectinload(Attachment.uploaded_by_user),
-            selectinload(Plan.attachments)
-            .selectinload(Attachment.uploaded_by_device),
-            selectinload(Plan.days)
-            .selectinload(PlanDay.subtasks)
-            .selectinload(Subtask.submissions)
-            .selectinload(SubtaskSubmission.submitted_by_user),
-            selectinload(Plan.days)
-            .selectinload(PlanDay.subtasks)
-            .selectinload(Subtask.submissions)
-            .selectinload(SubtaskSubmission.submitted_by_device),
-            selectinload(Plan.days)
-            .selectinload(PlanDay.subtasks)
-            .selectinload(Subtask.attachments)
-            .selectinload(Attachment.uploaded_by_user),
-            selectinload(Plan.days)
-            .selectinload(PlanDay.subtasks)
-            .selectinload(Subtask.attachments)
-            .selectinload(Attachment.uploaded_by_device),
+
+@router.post("/plan/{plan_id}/submit", response_class=HTMLResponse)
+async def submit_subtask(
+    plan_id: int,
+    request: Request,
+    subtask_id: int = Form(...),
+    comment: str | None = Form(None),
+    user_id: str | None = Form(None),
+    photo: UploadFile | None = File(None),
+    session: Session = Depends(get_session),
+):
+    """Handle submission of subtask evidence including optional photo uploads."""
+
+    plan = _load_plan_for_render(session, plan_id)
+
+    device = getattr(request.state, "device", None)
+    if device is None:
+        raise HTTPException(status_code=400, detail="Device not recognized")
+
+    trimmed_comment = (comment or "").strip()
+    submitted_user: User | None = None
+    if user_id:
+        try:
+            parsed_user_id = int(user_id)
+        except (TypeError, ValueError):
+            parsed_user_id = None
+        if parsed_user_id is None:
+            submission_errors = ["Select a valid family member or leave the field blank."]
+            form_state = {
+                "comment": trimmed_comment,
+                "user_id": user_id or "",
+                "subtask_id": subtask_id,
+            }
+            return _render_plan_page(
+                request,
+                session,
+                plan,
+                status_code=status.HTTP_400_BAD_REQUEST,
+                active_modal="submit",
+                active_subtask_id=subtask_id,
+                submission_errors=submission_errors,
+                submission_form=form_state,
+            )
+
+        submitted_user = session.get(User, parsed_user_id)
+        if submitted_user is None or not submitted_user.is_active:
+            submission_errors = ["Select a valid family member or leave the field blank."]
+            form_state = {
+                "comment": trimmed_comment,
+                "user_id": user_id or "",
+                "subtask_id": subtask_id,
+            }
+            return _render_plan_page(
+                request,
+                session,
+                plan,
+                status_code=status.HTTP_400_BAD_REQUEST,
+                active_modal="submit",
+                active_subtask_id=subtask_id,
+                submission_errors=submission_errors,
+                submission_form=form_state,
+            )
+
+    subtask_stmt = (
+        select(Subtask)
+        .where(Subtask.id == subtask_id)
+        .options(selectinload(Subtask.plan_day))
+    )
+    subtask = session.exec(subtask_stmt).one_or_none()
+
+    errors: list[str] = []
+    if subtask is None or subtask.plan_day.plan_id != plan_id:
+        errors.append("We couldn't find that subtask.")
+    elif subtask.status not in {SubtaskStatus.PENDING, SubtaskStatus.DENIED}:
+        errors.append("This subtask isn't accepting submissions right now.")
+
+    if photo is None or not photo.filename:
+        errors.append("Please attach a photo to submit evidence.")
+    else:
+        if photo.content_type not in {"image/jpeg", "image/png", "image/webp"}:
+            errors.append("Please upload a JPEG, PNG, or WEBP image.")
+        else:
+            contents = await photo.read()
+            max_bytes = settings.max_upload_mb * 1024 * 1024
+            if len(contents) > max_bytes:
+                errors.append(
+                    f"Photo is too large. Maximum allowed size is {settings.max_upload_mb} MB."
+                )
+            await photo.seek(0)
+
+    if errors:
+        form_state = {
+            "comment": trimmed_comment,
+            "user_id": user_id or "",
+            "subtask_id": subtask_id,
+        }
+        return _render_plan_page(
+            request,
+            session,
+            plan,
+            status_code=status.HTTP_400_BAD_REQUEST,
+            active_modal="submit",
+            active_subtask_id=subtask_id,
+            submission_errors=errors,
+            submission_form=form_state,
         )
+
+    try:
+        saved = await process_image(photo)
+    except Exception:
+        form_state = {
+            "comment": trimmed_comment,
+            "user_id": user_id or "",
+            "subtask_id": subtask_id,
+        }
+        return _render_plan_page(
+            request,
+            session,
+            plan,
+            status_code=status.HTTP_400_BAD_REQUEST,
+            active_modal="submit",
+            active_subtask_id=subtask_id,
+            submission_errors=[
+                "We couldn't process that photo. Please try again with a different image."
+            ],
+            submission_form=form_state,
+        )
+
+    now = datetime.utcnow()
+    subtask.status = SubtaskStatus.SUBMITTED
+    subtask.updated_at = now
+    subtask.plan_day.updated_at = now
+    plan.updated_at = now
+
+    submission = SubtaskSubmission(
+        subtask_id=subtask.id,
+        submitted_by_device_id=device.id,
+        submitted_by_user_id=submitted_user.id if submitted_user else None,
+        comment=trimmed_comment or None,
+        photo_path=saved["file"],
     )
 
-    plan = session.exec(stmt).one_or_none()
-    if plan is None:
-        raise HTTPException(status_code=404, detail="Plan not found")
-
-    if refresh_plan_day_locks(plan):
-        session.add(plan)
-        session.commit()
-        plan = session.exec(stmt).one()
-
-    plan_context = _build_plan_context(plan)
-
-    return templates.TemplateResponse(
-        "plan.html",
-        {
-            "request": request,
-            "plan": plan_context,
-            "title": f"{plan_context['title']} • Plan",
-        },
+    attachment = Attachment(
+        plan_id=plan.id,
+        subtask_id=subtask.id,
+        file_path=saved["file"],
+        thumb_path=saved["thumb"],
+        uploaded_by_device_id=device.id,
+        uploaded_by_user_id=submitted_user.id if submitted_user else None,
     )
+
+    session.add(submission)
+    session.add(attachment)
+    session.add(subtask)
+    session.add(plan)
+    session.commit()
+
+    redirect_url = request.url_for("view_plan", plan_id=str(plan_id))
+    return RedirectResponse(redirect_url, status_code=status.HTTP_303_SEE_OTHER)
