@@ -1,0 +1,35 @@
+{% if board.totals.plan_count == 0 %}
+  <div class="sm:col-span-2 xl:col-span-4 rounded-lg border-2 border-dashed border-indigo-200 bg-indigo-50/60 p-6 text-center">
+    <h3 class="text-lg font-semibold text-indigo-800">No plans yet</h3>
+    <p class="mt-2 text-sm text-indigo-700">
+      Import your first plan from the admin tools to start tracking XP and daily progress.
+    </p>
+    <a
+      class="mt-4 inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700"
+      href="{{ url_for('devices') }}"
+    >
+      Go to admin tools
+    </a>
+  </div>
+{% else %}
+  <div class="rounded-lg bg-white p-5 shadow-sm ring-1 ring-slate-200">
+    <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Active plans</p>
+    <p class="mt-2 text-3xl font-bold text-slate-900">{{ board.totals.active_plan_count }}</p>
+    <p class="mt-1 text-xs text-slate-500">{{ board.totals.plan_count }} total plans</p>
+  </div>
+  <div class="rounded-lg bg-white p-5 shadow-sm ring-1 ring-slate-200">
+    <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Family XP</p>
+    <p class="mt-2 text-3xl font-bold text-slate-900">{{ board.totals.family_total_xp }}</p>
+    <p class="mt-1 text-xs text-slate-500">Combined across all users</p>
+  </div>
+  <div class="rounded-lg bg-white p-5 shadow-sm ring-1 ring-slate-200">
+    <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Family members</p>
+    <p class="mt-2 text-3xl font-bold text-slate-900">{{ board.totals.user_count }}</p>
+    <p class="mt-1 text-xs text-slate-500">{{ board.has_any_users and "Active profiles" or "Set up your first member" }}</p>
+  </div>
+  <div class="rounded-lg bg-white p-5 shadow-sm ring-1 ring-slate-200">
+    <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Linked devices</p>
+    <p class="mt-2 text-3xl font-bold text-slate-900">{{ board.totals.device_count }}</p>
+    <p class="mt-1 text-xs text-slate-500">Connected check-in devices</p>
+  </div>
+{% endif %}

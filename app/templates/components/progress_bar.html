@@ -1,1 +1,21 @@
-<!-- Progress bar component placeholder. -->
+{% set display_label = label or "Progress" %}
+{% set current_value = current or 0 %}
+{% set target_value = target or 100 %}
+{% set percent_value = percent if percent is not none else 0 %}
+
+<div class="w-full">
+  <div class="flex items-center justify-between text-xs text-slate-500">
+    <span class="font-medium text-slate-600">{{ display_label }}</span>
+    <span>{{ current_value }} / {{ target_value }} XP</span>
+  </div>
+  <div class="mt-2 h-2 w-full rounded-full bg-slate-200">
+    <div
+      class="h-2 rounded-full bg-indigo-500 transition-all duration-300"
+      style="width: {{ percent_value }}%;"
+      role="progressbar"
+      aria-valuenow="{{ percent_value }}"
+      aria-valuemin="0"
+      aria-valuemax="100"
+    ></div>
+  </div>
+</div>
