@@ -10,7 +10,7 @@ from app.api.public import router as public_router
 from app.api.review import router as review_router
 from app.api.uploads import router as uploads_router
 from app.core.config import settings
-from app.core.device import ensure_device_cookie
+from app.core.device import COOKIE_NAME, ensure_device_cookie
 
 app = FastAPI(title="Family Task Portal")
 app.add_middleware(SessionMiddleware, secret_key=settings.session_secret)
@@ -23,8 +23,18 @@ templates = Jinja2Templates(directory="app/templates")
 @app.middleware("http")
 async def device_cookie_middleware(request: Request, call_next):
     """Ensure each device interacting with the app has an identifying cookie."""
+    device, cookie_missing = ensure_device_cookie(request)
+    request.state.device = device
     response: Response = await call_next(request)
-    ensure_device_cookie(request, response)
+    if cookie_missing:
+        response.set_cookie(
+            COOKIE_NAME,
+            device.id,
+            httponly=True,
+            samesite="lax",
+            secure=False,
+            max_age=60 * 60 * 24 * 365 * 5,
+        )
     return response
 
 
