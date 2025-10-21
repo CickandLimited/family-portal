@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="space-y-6">
+  <header class="space-y-2">
+    <h1 class="text-3xl font-bold">Activity Log</h1>
+    <p class="text-slate-600">
+      Review recent actions across the portal. Use the filters to narrow the
+      results and HTMX will update the list automatically.
+    </p>
+  </header>
+
+  <form
+    id="activity-log-filter"
+    class="grid gap-4 rounded-xl bg-white p-4 shadow md:grid-cols-4"
+    hx-get="{{ request.url_for('activity_log_entries') }}"
+    hx-include="#activity-log-filter"
+    hx-target="#activity-log-results"
+    hx-trigger="change delay:300ms, submit"
+    hx-vals='{"page": 1}'
+    hx-push-url="true"
+  >
+    <div class="space-y-1">
+      <label for="activity-action" class="text-sm font-medium text-slate-700">
+        Action
+      </label>
+      <select
+        id="activity-action"
+        name="action"
+        class="w-full rounded border border-slate-300 p-2"
+      >
+        <option value="">All actions</option>
+        {% for action in action_options %}
+          <option value="{{ action }}" {% if filter_form.action == action %}selected{% endif %}>
+            {{ action }}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="space-y-1">
+      <label for="activity-entity" class="text-sm font-medium text-slate-700">
+        Entity type
+      </label>
+      <select
+        id="activity-entity"
+        name="entity_type"
+        class="w-full rounded border border-slate-300 p-2"
+      >
+        <option value="">All entities</option>
+        {% for entity_type in entity_type_options %}
+          <option value="{{ entity_type }}" {% if filter_form.entity_type == entity_type %}selected{% endif %}>
+            {{ entity_type }}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="space-y-1">
+      <label for="activity-device" class="text-sm font-medium text-slate-700">
+        Device
+      </label>
+      <select
+        id="activity-device"
+        name="device_id"
+        class="w-full rounded border border-slate-300 p-2"
+      >
+        <option value="">All devices</option>
+        {% for option in device_options %}
+          <option value="{{ option.value }}" {% if filter_form.device_id == option.value %}selected{% endif %}>
+            {{ option.label }}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="space-y-1">
+      <label for="activity-user" class="text-sm font-medium text-slate-700">
+        Actor user
+      </label>
+      <select
+        id="activity-user"
+        name="user_id"
+        class="w-full rounded border border-slate-300 p-2"
+      >
+        <option value="">All users</option>
+        {% for option in user_options %}
+          <option value="{{ option.value }}" {% if filter_form.user_id == option.value %}selected{% endif %}>
+            {{ option.label }}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="md:col-span-4 flex items-end justify-between">
+      <button
+        type="submit"
+        class="rounded bg-slate-900 px-4 py-2 font-semibold text-white shadow hover:bg-slate-700"
+      >
+        Apply filters
+      </button>
+      <a
+        href="{{ request.url_for('activity_log') }}"
+        class="text-sm font-medium text-slate-600 hover:text-slate-900"
+      >
+        Reset filters
+      </a>
+    </div>
+  </form>
+
+  <div id="activity-log-results">
+    {% include "components/activity_log_table.html" %}
+  </div>
+</section>
+{% endblock %}

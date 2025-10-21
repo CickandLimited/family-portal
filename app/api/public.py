@@ -22,6 +22,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import selectinload
 from sqlmodel import Session, select
 
+from app.core.activity_log import log_activity
 from app.core.config import settings
 from app.core.db import get_session
 from app.core.locking import PlanProgress, ProgressCache, refresh_plan_day_locks
@@ -654,6 +655,28 @@ async def submit_subtask(
     session.add(attachment)
     session.add(subtask)
     session.add(plan)
+    session.flush()
+
+    log_activity(
+        session,
+        action="subtask.submitted",
+        entity_type="submission",
+        entity_id=submission.id,
+        metadata={
+            "plan_id": plan.id,
+            "plan_title": plan.title,
+            "subtask_id": subtask.id,
+            "subtask_title": subtask.title,
+            "comment": trimmed_comment or None,
+            "photo_path": saved["file"],
+            "submitted_user_id": getattr(submitted_user, "id", None),
+            "submitted_user_name": getattr(submitted_user, "display_name", None),
+            "xp_value": subtask.xp_value,
+        },
+        device=device,
+        user=submitted_user,
+    )
+
     session.commit()
 
     if _is_htmx_request(request):
