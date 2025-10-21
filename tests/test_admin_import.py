@@ -19,16 +19,46 @@ class ActivityLogStub:
         action: str,
         entity_type: str,
         entity_id: int,
-        metadata_payload: dict | None = None,
+        metadata: dict | None = None,
         device_id: str | None = None,
         user_id: int | None = None,
     ) -> None:
         self.action = action
         self.entity_type = entity_type
         self.entity_id = entity_id
-        self.metadata_payload = metadata_payload
+        self.metadata = metadata
         self.device_id = device_id
         self.user_id = user_id
+
+
+def log_activity_stub(
+    session: StubSession,
+    *,
+    action: str,
+    entity_type: str,
+    entity_id: int,
+    metadata: dict | None = None,
+    device: object | None = None,
+    user: object | None = None,
+    device_id: str | None = None,
+    user_id: int | None = None,
+    commit: bool = False,
+) -> ActivityLogStub:
+    resolved_device_id = device_id or getattr(device, "id", None)
+    resolved_user_id = user_id or getattr(user, "id", None)
+
+    entry = ActivityLogStub(
+        action=action,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        metadata=metadata,
+        device_id=resolved_device_id,
+        user_id=resolved_user_id,
+    )
+    session.add(entry)
+    if commit:
+        session.commit()
+    return entry
 
 
 SAMPLE_MARKDOWN = """# Trip Plan\n\n## Day 1 – Arrival\n- [ ] Check in at hotel\n"""
@@ -80,7 +110,7 @@ def test_admin_import_success_creates_activity_log(
         return plan_id
 
     monkeypatch.setattr(admin_module, "import_markdown_plan", fake_import)
-    monkeypatch.setattr(admin_module, "ActivityLog", ActivityLogStub)
+    monkeypatch.setattr(admin_module, "log_activity", log_activity_stub)
 
     response = client.post(
         "/admin/import",
@@ -100,7 +130,7 @@ def test_admin_import_success_creates_activity_log(
     assert log.action == "plan.imported"
     assert log.entity_type == "plan"
     assert log.entity_id == plan_id
-    assert log.metadata_payload == {
+    assert log.metadata == {
         "filename": "plan.md",
         "assignee_user_id": 7,
     }
@@ -115,7 +145,7 @@ def test_admin_import_failure_logs_activity(
         raise ValueError("Markdown plan is empty.")
 
     monkeypatch.setattr(admin_module, "import_markdown_plan", fake_import)
-    monkeypatch.setattr(admin_module, "ActivityLog", ActivityLogStub)
+    monkeypatch.setattr(admin_module, "log_activity", log_activity_stub)
 
     response = client.post(
         "/admin/import",
@@ -135,7 +165,7 @@ def test_admin_import_failure_logs_activity(
     assert log.action == "plan.import_failed"
     assert log.entity_type == "plan"
     assert log.entity_id == 0
-    assert log.metadata_payload == {
+    assert log.metadata == {
         "filename": "bad.md",
         "assignee_user_id": 5,
         "error": "Markdown plan is empty.",

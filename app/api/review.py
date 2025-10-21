@@ -27,7 +27,7 @@ from app.core.xp import (
     is_day_complete,
     is_plan_complete,
 )
-from app.models.activity import ActivityLog
+from app.core.activity_log import log_activity
 from app.models.approvals import Approval, ApprovalAction, ApprovalMood
 from app.models.devices import Device
 from app.models.plans import Plan
@@ -441,27 +441,25 @@ def approve(
     session.add(subtask)
     session.add(plan)
 
-    session.add(
-        ActivityLog(
-            action="subtask.approved",
-            entity_type="subtask",
-            entity_id=subtask.id,
-            metadata_payload={
-                "plan_id": plan.id,
-                "plan_title": plan.title,
-                "plan_day_id": getattr(plan_day, "id", None),
-                "mood": mood.value,
-                "xp_value": subtask.xp_value,
-                "approval_notes": notes.strip() or None,
-                "submission_id": submission.id,
-                "xp_events": [
-                    {"reason": event.reason, "delta": event.delta}
-                    for event in xp_events
-                ],
-            },
-            device_id=acting_device.id,
-            user_id=getattr(acting_user, "id", None),
-        )
+    log_activity(
+        session,
+        action="subtask.approved",
+        entity_type="subtask",
+        entity_id=subtask.id,
+        metadata={
+            "plan_id": plan.id,
+            "plan_title": plan.title,
+            "plan_day_id": getattr(plan_day, "id", None),
+            "mood": mood.value,
+            "xp_value": subtask.xp_value,
+            "approval_notes": notes.strip() or None,
+            "submission_id": submission.id,
+            "xp_events": [
+                {"reason": event.reason, "delta": event.delta} for event in xp_events
+            ],
+        },
+        device=acting_device,
+        user=acting_user,
     )
 
     plan.total_xp = calculate_plan_total_xp(plan)
@@ -545,22 +543,21 @@ def deny(
     session.add(subtask)
     session.add(plan)
 
-    session.add(
-        ActivityLog(
-            action="subtask.denied",
-            entity_type="subtask",
-            entity_id=subtask.id,
-            metadata_payload={
-                "plan_id": plan.id,
-                "plan_title": plan.title,
-                "plan_day_id": getattr(plan_day, "id", None),
-                "mood": mood.value,
-                "reason": cleaned_reason,
-                "submission_id": submission.id,
-            },
-            device_id=acting_device.id,
-            user_id=getattr(acting_user, "id", None),
-        )
+    log_activity(
+        session,
+        action="subtask.denied",
+        entity_type="subtask",
+        entity_id=subtask.id,
+        metadata={
+            "plan_id": plan.id,
+            "plan_title": plan.title,
+            "plan_day_id": getattr(plan_day, "id", None),
+            "mood": mood.value,
+            "reason": cleaned_reason,
+            "submission_id": submission.id,
+        },
+        device=acting_device,
+        user=acting_user,
     )
 
     session.commit()
