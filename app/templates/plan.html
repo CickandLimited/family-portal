@@ -43,29 +43,13 @@
         </div>
       </div>
 
-      <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <div class="rounded-xl border border-slate-200 p-4">
-          <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Days Complete</p>
-          <p class="mt-2 text-2xl font-semibold text-slate-900">
-            {{ plan.completed_days }}
-            <span class="text-base font-medium text-slate-500">/ {{ plan.total_days }}</span>
-          </p>
-        </div>
-        <div class="rounded-xl border border-slate-200 p-4">
-          <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Subtasks Approved</p>
-          <p class="mt-2 text-2xl font-semibold text-slate-900">
-            {{ plan.completed_subtasks }}
-            <span class="text-base font-medium text-slate-500">/ {{ plan.total_subtasks }}</span>
-          </p>
-        </div>
-        <div class="rounded-xl border border-slate-200 p-4">
-          <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Plan Progress</p>
-          <p class="mt-2 text-2xl font-semibold text-slate-900">{{ plan.progress_percent }}%</p>
-        </div>
-        <div class="rounded-xl border border-slate-200 p-4">
-          <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Total XP</p>
-          <p class="mt-2 text-2xl font-semibold text-slate-900">{{ plan.total_xp }}</p>
-        </div>
+      <div
+        id="plan-progress-cards"
+        hx-get="{{ request.url_for('plan_progress_partial', plan_id=plan.id) }}"
+        hx-trigger="planProgressUpdated from:body[detail.plan_id === {{ plan.id }}]"
+        hx-swap="innerHTML"
+      >
+        {% include "components/plan_progress_overview.html" %}
       </div>
     </section>
 
@@ -100,79 +84,14 @@
       </section>
     {% endif %}
 
-    <section class="space-y-4">
-      {% if plan.days %}
-        {% for day in plan.days %}
-          <div
-            x-data="{ open: {{ 'true' if not day.locked and loop.first else 'false' }}, locked: {{ 'true' if day.locked else 'false' }} }"
-            class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow"
-          >
-            <button
-              type="button"
-              class="flex w-full items-center justify-between gap-4 p-5 text-left transition"
-              :class="locked ? 'cursor-not-allowed opacity-60' : 'hover:bg-slate-50'"
-              @click="if (!locked) { open = !open }"
-            >
-              <div>
-                <p class="text-lg font-semibold text-slate-900">
-                  Day {{ day.index + 1 }} · {{ day.title }}
-                </p>
-                <p class="text-sm text-slate-500">
-                  {{ day.completed_subtasks }} of {{ day.total_subtasks }} subtasks complete
-                </p>
-              </div>
-              <div class="flex items-center gap-3">
-                {% if day.locked %}
-                  <span class="inline-flex items-center rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-700">
-                    Locked
-                  </span>
-                {% elif day.complete %}
-                  <span class="inline-flex items-center rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700">
-                    Complete
-                  </span>
-                {% else %}
-                  <span class="inline-flex items-center rounded-full bg-indigo-100 px-3 py-1 text-xs font-semibold text-indigo-700">
-                    In Progress
-                  </span>
-                {% endif %}
-                <svg
-                  class="h-5 w-5 text-slate-500 transition-transform"
-                  :class="open ? 'rotate-180' : 'rotate-0'"
-                  xmlns="http://www.w3.org/2000/svg"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke-width="1.5"
-                  stroke="currentColor"
-                >
-                  <path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
-                </svg>
-              </div>
-            </button>
-
-            {% if day.locked %}
-              <div class="border-t border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
-                Complete the previous day to unlock these subtasks.
-              </div>
-            {% endif %}
-
-            <div x-cloak x-show="open" class="border-t border-slate-200">
-              <ul class="divide-y divide-slate-200">
-                {% for subtask in day.subtasks %}
-                  {% include "components/subtask_item.html" with subtask=subtask, day_locked=day.locked %}
-                {% else %}
-                  <li class="p-5 text-sm text-slate-500">
-                    No subtasks scheduled for this day yet.
-                  </li>
-                {% endfor %}
-              </ul>
-            </div>
-          </div>
-        {% endfor %}
-      {% else %}
-        <div class="rounded-2xl border border-dashed border-slate-300 bg-white p-6 text-center text-slate-500">
-          This plan does not have any days yet.
-        </div>
-      {% endif %}
+    <section
+      class="space-y-4"
+      id="plan-day-list"
+      hx-get="{{ request.url_for('plan_days_partial', plan_id=plan.id) }}"
+      hx-trigger="planProgressUpdated from:body[detail.plan_id === {{ plan.id }}]"
+      hx-swap="innerHTML"
+    >
+      {% include "components/plan_day_list.html" %}
     </section>
 
     <div
@@ -204,6 +123,10 @@
           method="post"
           action="{{ request.url_for('submit_subtask', plan_id=plan.id) }}"
           enctype="multipart/form-data"
+          hx-post="{{ request.url_for('submit_subtask', plan_id=plan.id) }}"
+          hx-encoding="multipart/form-data"
+          hx-swap="none"
+          hx-on::after-request="handleSubmissionResponse($event)"
         >
           <template x-if="formErrors.length">
             <div class="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
@@ -369,6 +292,50 @@
           this.modalSubtaskId = null;
           this.formErrors = [];
           this.formData = { comment: "", user_id: "", subtask_id: null };
+        },
+        handleSubmissionResponse(event) {
+          const detail = event.detail;
+          if (!detail) {
+            return;
+          }
+
+          if (detail.successful) {
+            const photoField = document.getElementById("photo");
+            if (photoField) {
+              photoField.value = "";
+            }
+            this.formErrors = [];
+            this.closeModal();
+            return;
+          }
+
+          if (detail.failed) {
+            let payload = null;
+            try {
+              payload = JSON.parse(detail.xhr.responseText);
+            } catch (err) {
+              payload = null;
+            }
+
+            if (payload && Array.isArray(payload.errors)) {
+              this.formErrors = payload.errors;
+            } else {
+              this.formErrors = [
+                "We couldn't submit your update. Please check your photo and try again.",
+              ];
+            }
+
+            if (payload && payload.form) {
+              this.formData = {
+                comment: payload.form.comment || "",
+                user_id: payload.form.user_id || "",
+                subtask_id: payload.form.subtask_id || this.formData.subtask_id,
+              };
+              if (payload.form.subtask_id) {
+                this.modalSubtaskId = payload.form.subtask_id;
+              }
+            }
+          }
         },
       };
     }
