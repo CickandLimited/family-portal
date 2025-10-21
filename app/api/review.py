@@ -13,6 +13,17 @@ from sqlmodel import Session, select
 
 from app.core.db import get_session
 from app.core.locking import refresh_plan_day_locks
+from app.core.xp import (
+    DAY_COMPLETION_BONUS,
+    PLAN_COMPLETION_BONUS,
+    XP_APPROVAL_REASON,
+    XP_DAY_COMPLETION_REASON,
+    XP_PLAN_COMPLETION_REASON,
+    calculate_plan_total_xp,
+    is_day_bonus_eligible,
+    is_day_complete,
+    is_plan_complete,
+)
 from app.models.activity import ActivityLog
 from app.models.approvals import Approval, ApprovalAction, ApprovalMood
 from app.models.devices import Device
@@ -44,9 +55,6 @@ MOOD_OPTIONS: list[dict[str, str]] = [
     {"value": ApprovalMood.NEUTRAL.value, "label": "Neutral"},
     {"value": ApprovalMood.SAD.value, "label": "Concerned"},
 ]
-
-XP_APPROVAL_REASON = "subtask.approved"
-
 
 def _subtask_review_statement():
     """Return a select statement with eager-load configuration for reviews."""
@@ -311,17 +319,58 @@ def approve(
     )
     session.add(approval)
 
-    xp_event: XPEvent | None = None
-    if plan.assignee_user_id is not None:
-        xp_event = XPEvent(
-            user_id=plan.assignee_user_id,
-            subtask_id=subtask.id,
-            delta=subtask.xp_value,
-            reason=XP_APPROVAL_REASON,
+    xp_events: list[XPEvent] = []
+    assignee_id = plan.assignee_user_id
+    day_was_complete = plan_day and is_day_complete(plan_day)
+    plan_was_complete = is_plan_complete(plan)
+
+    if assignee_id is not None:
+        xp_events.append(
+            XPEvent(
+                user_id=assignee_id,
+                subtask_id=subtask.id,
+                delta=subtask.xp_value,
+                reason=XP_APPROVAL_REASON,
+            )
         )
-        session.add(xp_event)
 
     _update_plan_state(plan)
+
+    day_is_complete = plan_day and is_day_complete(plan_day)
+    if (
+        assignee_id is not None
+        and plan_day
+        and not day_was_complete
+        and day_is_complete
+        and is_day_bonus_eligible(plan_day)
+    ):
+        xp_events.append(
+            XPEvent(
+                user_id=assignee_id,
+                subtask_id=None,
+                delta=DAY_COMPLETION_BONUS,
+                reason=XP_DAY_COMPLETION_REASON,
+            )
+        )
+
+    plan_is_complete = is_plan_complete(plan)
+    if (
+        assignee_id is not None
+        and not plan_was_complete
+        and plan_is_complete
+        and plan.days
+    ):
+        xp_events.append(
+            XPEvent(
+                user_id=assignee_id,
+                subtask_id=None,
+                delta=PLAN_COMPLETION_BONUS,
+                reason=XP_PLAN_COMPLETION_REASON,
+            )
+        )
+
+    for event in xp_events:
+        session.add(event)
 
     session.add(subtask)
     session.add(plan)
@@ -339,12 +388,17 @@ def approve(
                 "xp_value": subtask.xp_value,
                 "approval_notes": notes.strip() or None,
                 "submission_id": submission.id,
-                "xp_event": getattr(xp_event, "id", None),
+                "xp_events": [
+                    {"reason": event.reason, "delta": event.delta}
+                    for event in xp_events
+                ],
             },
             device_id=acting_device.id,
             user_id=getattr(acting_user, "id", None),
         )
     )
+
+    plan.total_xp = calculate_plan_total_xp(plan)
 
     session.commit()
 
