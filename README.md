@@ -30,3 +30,38 @@ sudo systemctl status family-portal.service
 ```
 
 If you wish to configure nginx as a reverse proxy or add HTTPS, extend the provisioning steps as needed.
+
+## Backups and disaster recovery
+
+Nightly application backups can be taken with the `scripts/backup.sh` helper. The script creates a timestamped tarball containing the application install directory (`/opt/family-portal`) and uploaded media (`/var/lib/family-portal`) inside `/var/backups/family-portal`, pruning archives older than 30 days by default.
+
+1. Copy the sample systemd units into place and reload systemd:
+   ```bash
+   sudo cp deploy/systemd/family-portal-backup.* /etc/systemd/system/
+   sudo systemctl daemon-reload
+   ```
+2. Enable and start the nightly timer:
+   ```bash
+   sudo systemctl enable --now family-portal-backup.timer
+   ```
+3. (Optional) Trigger an immediate backup and follow its logs:
+   ```bash
+   sudo systemctl start family-portal-backup.service
+   sudo journalctl -u family-portal-backup.service -f
+   ```
+
+You can confirm that new archives are being produced by listing the backup directory:
+
+```bash
+sudo ls -lh /var/backups/family-portal
+```
+
+To restore from a backup archive, stop the running service, extract the desired tarball, and start the service again:
+
+```bash
+sudo systemctl stop family-portal.service
+sudo tar -xzf /var/backups/family-portal/family-portal-<timestamp>.tar.gz -C /
+sudo systemctl start family-portal.service
+```
+
+The archive contains absolute paths, so extracting at `/` reinstates both the application code under `/opt/family-portal` and the uploads under `/var/lib/family-portal`. Adjust the paths or override the script's environment variables (`APP_ROOT`, `DATA_ROOT`, `BACKUP_ROOT`, and `RETENTION_DAYS`) if your deployment differs from the defaults.
