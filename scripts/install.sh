@@ -1,0 +1,385 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+log() {
+  printf '[installer] %s\n' "$*"
+}
+
+die() {
+  echo "[installer] ERROR: $*" >&2
+  exit 1
+}
+
+require_cmd() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    die "Required command '$1' is not available on PATH."
+  fi
+}
+
+prompt_with_default() {
+  local prompt="$1" default_value="$2" response
+  read -rp "$prompt [$default_value]: " response
+  if [[ -z "$response" ]]; then
+    response="$default_value"
+  fi
+  echo "$response"
+}
+
+prompt_secret() {
+  local secret confirm
+  while true; do
+    read -rsp "Enter session secret: " secret
+    echo
+    if [[ -z "$secret" ]]; then
+      echo "Secret cannot be empty. Please try again." >&2
+      continue
+    fi
+    read -rsp "Confirm session secret: " confirm
+    echo
+    if [[ "$secret" == "$confirm" ]]; then
+      echo "$secret"
+      return 0
+    fi
+    echo "Secrets did not match. Please try again." >&2
+  done
+}
+
+ask_yes_no() {
+  local prompt="$1" default_choice="$2" response default_hint
+  if [[ "$default_choice" =~ ^[Yy]$ ]]; then
+    default_hint="Y/n"
+  else
+    default_hint="y/N"
+  fi
+  while true; do
+    read -rp "$prompt [$default_hint]: " response
+    response=${response:-$default_choice}
+    case "$response" in
+      [Yy]|[Yy][Ee][Ss]) return 0 ;;
+      [Nn]|[Nn][Oo]) return 1 ;;
+      '')
+        if [[ "$default_choice" =~ ^[Yy]$ ]]; then
+          return 0
+        else
+          return 1
+        fi
+        ;;
+    esac
+    echo "Please answer yes or no." >&2
+  done
+}
+
+abspath() {
+  python3 - <<'PY' "$1"
+import os, sys
+print(os.path.abspath(sys.argv[1]))
+PY
+}
+
+run_privileged() {
+  local sudo_cmd="$1"
+  shift
+  if [[ -n "$sudo_cmd" ]]; then
+    "$sudo_cmd" "$@"
+  else
+    "$@"
+  fi
+}
+
+install_systemd_service() {
+  local app_dir="$1" env_file="$2" service_user="$3" sudo_cmd="$4"
+  log "Installing systemd service for user $service_user"
+  local service_path="/etc/systemd/system/family-portal.service"
+  local uvicorn_exec="$app_dir/.venv/bin/uvicorn"
+
+  if [[ ! -x "$uvicorn_exec" ]]; then
+    die "Expected uvicorn executable at $uvicorn_exec"
+  fi
+
+  if [[ -n "$sudo_cmd" ]]; then
+    cat <<UNIT | "$sudo_cmd" tee "$service_path" >/dev/null
+[Unit]
+Description=Family Portal (Uvicorn)
+After=network.target
+
+[Service]
+Type=simple
+User=$service_user
+WorkingDirectory=$app_dir
+EnvironmentFile=$env_file
+ExecStart=$uvicorn_exec app.main:app --host 0.0.0.0 --port 8080
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+  else
+    cat <<UNIT >"$service_path"
+[Unit]
+Description=Family Portal (Uvicorn)
+After=network.target
+
+[Service]
+Type=simple
+User=$service_user
+WorkingDirectory=$app_dir
+EnvironmentFile=$env_file
+ExecStart=$uvicorn_exec app.main:app --host 0.0.0.0 --port 8080
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+  fi
+
+  run_privileged "$sudo_cmd" systemctl daemon-reload
+  run_privileged "$sudo_cmd" systemctl enable --now family-portal.service
+  log "systemd service enabled."
+}
+
+configure_nginx_proxy() {
+  local sudo_cmd="$1"
+  local nginx_script="$SCRIPT_DIR/install_nginx_config.sh"
+  if [[ ! -x "$nginx_script" ]]; then
+    die "Expected nginx installer script at $nginx_script"
+  fi
+
+  log "Installing nginx configuration"
+  if [[ -n "$sudo_cmd" ]]; then
+    $sudo_cmd "$nginx_script"
+  else
+    "$nginx_script"
+  fi
+}
+
+schedule_backup_timer() {
+  local app_dir="$1" sudo_cmd="$2"
+  local service_path="/etc/systemd/system/family-portal-backup.service"
+  local timer_source="$REPO_ROOT/deploy/systemd/family-portal-backup.timer"
+  local timer_dest="/etc/systemd/system/family-portal-backup.timer"
+  local data_root="/var/lib/family-portal"
+  local backup_root="/var/backups/family-portal"
+  local backup_script="$app_dir/scripts/backup.sh"
+
+  if [[ ! -x "$backup_script" ]]; then
+    die "Expected backup script at $backup_script"
+  fi
+
+  log "Configuring backup systemd units"
+  if [[ -n "$sudo_cmd" ]]; then
+    cat <<UNIT | "$sudo_cmd" tee "$service_path" >/dev/null
+[Unit]
+Description=Create Family Portal backup archive
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=APP_ROOT=$app_dir
+Environment=DATA_ROOT=$data_root
+Environment=BACKUP_ROOT=$backup_root
+Environment=RETENTION_DAYS=30
+ExecStart=$backup_script
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+  else
+    cat <<UNIT >"$service_path"
+[Unit]
+Description=Create Family Portal backup archive
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=APP_ROOT=$app_dir
+Environment=DATA_ROOT=$data_root
+Environment=BACKUP_ROOT=$backup_root
+Environment=RETENTION_DAYS=30
+ExecStart=$backup_script
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+  fi
+
+  if [[ -f "$timer_source" ]]; then
+    run_privileged "$sudo_cmd" install -D -m 0644 "$timer_source" "$timer_dest"
+  else
+    if [[ -n "$sudo_cmd" ]]; then
+      cat <<'TIMER' | "$sudo_cmd" tee "$timer_dest" >/dev/null
+[Unit]
+Description=Run Family Portal backup nightly
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+TIMER
+    else
+      cat <<'TIMER' >"$timer_dest"
+[Unit]
+Description=Run Family Portal backup nightly
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+TIMER
+    fi
+  fi
+
+  run_privileged "$sudo_cmd" mkdir -p "$backup_root"
+  local owner="${SUDO_USER:-$USER}"
+  if [[ -n "$owner" ]]; then
+    run_privileged "$sudo_cmd" chown "$owner":"$owner" "$backup_root"
+  fi
+
+  run_privileged "$sudo_cmd" systemctl daemon-reload
+  run_privileged "$sudo_cmd" systemctl enable --now family-portal-backup.timer
+  log "Backup timer enabled."
+}
+
+main() {
+  require_cmd git
+  require_cmd python3
+  require_cmd apt-get
+
+  local sudo_cmd=""
+  if [[ $EUID -ne 0 ]]; then
+    if command -v sudo >/dev/null 2>&1; then
+      sudo_cmd="sudo"
+    else
+      die "This script needs to install system packages. Run as root or ensure 'sudo' is available."
+    fi
+  fi
+
+  log "Family Portal installer"
+
+  local default_target="/opt/family-portal"
+  local target_dir_input
+  target_dir_input=$(prompt_with_default "Target installation directory" "$default_target")
+  local target_dir
+  target_dir=$(abspath "$target_dir_input")
+
+  local session_secret
+  session_secret=$(prompt_secret)
+
+  local run_migrations enable_systemd configure_nginx schedule_backups
+  ask_yes_no "Install or update systemd service?" "y" && enable_systemd=1 || enable_systemd=0
+  ask_yes_no "Configure nginx reverse proxy?" "n" && configure_nginx=1 || configure_nginx=0
+  ask_yes_no "Schedule nightly backups?" "y" && schedule_backups=1 || schedule_backups=0
+  ask_yes_no "Run Alembic migrations now?" "y" && run_migrations=1 || run_migrations=0
+
+  log "Installing apt packages (python3-venv, libjpeg-dev, libwebp-dev, nginx)..."
+  run_privileged "$sudo_cmd" apt-get update
+  run_privileged "$sudo_cmd" apt-get install -y python3-venv libjpeg-dev libwebp-dev nginx
+
+  if [[ ! -d "$target_dir" ]]; then
+    log "Creating target directory $target_dir"
+    run_privileged "$sudo_cmd" mkdir -p "$target_dir"
+  fi
+
+  local owner_user
+  owner_user="${SUDO_USER:-$USER}"
+  if [[ -n "$owner_user" ]]; then
+    run_privileged "$sudo_cmd" chown -R "$owner_user":"$owner_user" "$target_dir"
+  fi
+
+  local repo_url
+  if git -C "$REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    repo_url=$(git -C "$REPO_ROOT" remote get-url origin 2>/dev/null || true)
+  fi
+  if [[ -z "$repo_url" ]]; then
+    read -rp "Repository URL to clone: " repo_url
+    if [[ -z "$repo_url" ]]; then
+      die "A repository URL is required."
+    fi
+  fi
+
+  if [[ -d "$target_dir/.git" ]]; then
+    log "Existing git repository detected. Pulling latest changes..."
+    git -C "$target_dir" pull --ff-only
+  else
+    if [[ -d "$target_dir" && -n $(ls -A "$target_dir" 2>/dev/null) ]]; then
+      die "Target directory $target_dir is not empty and not a git repository."
+    fi
+    log "Cloning repository from $repo_url"
+    git clone "$repo_url" "$target_dir"
+  fi
+
+  log "Ensuring virtual environment exists..."
+  if [[ ! -d "$target_dir/.venv" ]]; then
+    python3 -m venv "$target_dir/.venv"
+  fi
+
+  log "Installing Python dependencies from pyproject.toml..."
+  "$target_dir/.venv/bin/pip" install --upgrade pip
+  (cd "$target_dir" && "$target_dir/.venv/bin/pip" install .)
+
+  local data_root uploads_dir thumbs_dir env_file
+  data_root="/var/lib/family-portal"
+  uploads_dir="$data_root/uploads"
+  thumbs_dir="$uploads_dir/thumbs"
+  env_file="$target_dir/.env"
+
+  log "Creating uploads directories under $uploads_dir"
+  run_privileged "$sudo_cmd" mkdir -p "$thumbs_dir"
+  if [[ -n "$owner_user" ]]; then
+    run_privileged "$sudo_cmd" chown -R "$owner_user":"$owner_user" "$data_root"
+  fi
+
+  log "Writing environment file at $env_file"
+  cat >"$env_file" <<ENV
+FP_SESSION_SECRET=$session_secret
+FP_DB_URL=sqlite:///${target_dir}/family_portal.db
+FP_UPLOADS_DIR=$uploads_dir
+FP_THUMBS_DIR=$thumbs_dir
+ENV
+  if [[ -n "$owner_user" ]]; then
+    run_privileged "$sudo_cmd" chown "$owner_user":"$owner_user" "$env_file"
+  fi
+  chmod 600 "$env_file"
+
+  if [[ ${run_migrations:-0} -eq 1 ]]; then
+    log "Running Alembic migrations..."
+    (cd "$target_dir" && \
+      FP_SESSION_SECRET="$session_secret" \
+      FP_DB_URL="sqlite:///${target_dir}/family_portal.db" \
+      FP_UPLOADS_DIR="$uploads_dir" \
+      FP_THUMBS_DIR="$thumbs_dir" \
+      "$target_dir/.venv/bin/alembic" upgrade head)
+  else
+    log "Skipping Alembic migrations at user request."
+  fi
+
+  if [[ ${enable_systemd:-0} -eq 1 ]]; then
+    install_systemd_service "$target_dir" "$env_file" "$owner_user" "$sudo_cmd"
+  else
+    log "Skipping systemd service installation."
+  fi
+
+  if [[ ${configure_nginx:-0} -eq 1 ]]; then
+    configure_nginx_proxy "$sudo_cmd"
+  else
+    log "Skipping nginx configuration."
+  fi
+
+  if [[ ${schedule_backups:-0} -eq 1 ]]; then
+    schedule_backup_timer "$target_dir" "$sudo_cmd"
+  else
+    log "Skipping backup timer installation."
+  fi
+
+  log "Installation complete."
+}
+
+main "$@"
