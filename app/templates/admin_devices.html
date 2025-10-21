@@ -1,24 +1,24 @@
 {% extends "base.html" %}
 
 {% block content %}
-<section class="space-y-4">
-  <h1 class="text-3xl font-bold">Device Manager</h1>
-  <p class="text-slate-600">
+<section class="space-y-3">
+  <h1 class="text-3xl font-bold text-slate-900">Device Manager</h1>
+  <p class="text-sm text-slate-600">
     Review detected devices, assign friendly names, and connect them to family members.
   </p>
 </section>
 
-<section class="mt-6 rounded-lg bg-white p-6 shadow">
+<section class="mt-6 rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
   {% if devices %}
   <div class="overflow-x-auto">
-    <table class="min-w-full divide-y divide-slate-200 text-sm">
-      <thead class="bg-slate-50">
+    <table class="min-w-full divide-y divide-slate-200 text-sm text-slate-700">
+      <thead class="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
         <tr>
-          <th class="px-3 py-2 text-left font-semibold uppercase tracking-wide text-slate-600">Device ID</th>
-          <th class="px-3 py-2 text-left font-semibold uppercase tracking-wide text-slate-600">Friendly name</th>
-          <th class="px-3 py-2 text-left font-semibold uppercase tracking-wide text-slate-600">Linked user</th>
-          <th class="px-3 py-2 text-left font-semibold uppercase tracking-wide text-slate-600">Created</th>
-          <th class="px-3 py-2 text-left font-semibold uppercase tracking-wide text-slate-600">Last seen</th>
+          <th class="px-3 py-2 text-left">Device ID</th>
+          <th class="px-3 py-2 text-left">Friendly name</th>
+          <th class="px-3 py-2 text-left">Linked user</th>
+          <th class="px-3 py-2 text-left">Created</th>
+          <th class="px-3 py-2 text-left">Last seen</th>
         </tr>
       </thead>
       <tbody class="divide-y divide-slate-100">
@@ -26,22 +26,22 @@
         <tr class="align-top">
           <td class="px-3 py-3 font-mono text-xs text-slate-500">{{ device.id }}</td>
           <td class="px-3 py-3">
-            <form class="flex gap-2" method="post" action="{{ url_for('rename_device', device_id=device.id) }}">
+            <form class="flex flex-col gap-2 sm:flex-row sm:items-center" method="post" action="{{ url_for('rename_device', device_id=device.id) }}">
               <input
-                class="w-full rounded border border-slate-300 px-2 py-1"
+                class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-200"
                 type="text"
                 name="friendly_name"
                 value="{{ device.friendly_name or '' }}"
                 placeholder="Add a nickname"
               />
-              <button class="rounded bg-slate-800 px-3 py-1 text-xs font-semibold text-white" type="submit">
+              <button class="inline-flex items-center justify-center rounded-md bg-slate-900 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-white shadow-sm transition hover:bg-slate-700" type="submit">
                 Save
               </button>
             </form>
           </td>
           <td class="px-3 py-3">
-            <form class="flex gap-2" method="post" action="{{ url_for('link_device_user', device_id=device.id) }}">
-              <select class="w-full rounded border border-slate-300 px-2 py-1" name="user_id">
+            <form class="flex flex-col gap-2 sm:flex-row sm:items-center" method="post" action="{{ url_for('link_device_user', device_id=device.id) }}">
+              <select class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-200" name="user_id">
                 <option value="" {% if not device.linked_user_id %}selected{% endif %}>Unassigned</option>
                 {% for user in users %}
                 <option value="{{ user.id }}" {% if user.id == device.linked_user_id %}selected{% endif %}>
@@ -49,7 +49,7 @@
                 </option>
                 {% endfor %}
               </select>
-              <button class="rounded bg-slate-800 px-3 py-1 text-xs font-semibold text-white" type="submit">
+              <button class="inline-flex items-center justify-center rounded-md bg-slate-900 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-white shadow-sm transition hover:bg-slate-700" type="submit">
                 Update
               </button>
             </form>
@@ -66,7 +66,9 @@
     </table>
   </div>
   {% else %}
-  <p class="text-slate-600">No devices have checked in yet.</p>
+  <div class="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-sm text-slate-600">
+    No devices have checked in yet. Once a browser opens the portal, it will appear here.
+  </div>
   {% endif %}
 </section>
 {% endblock %}

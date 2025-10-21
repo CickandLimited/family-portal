@@ -2,9 +2,9 @@
 
 {% block content %}
 <section class="space-y-6">
-  <header class="space-y-2">
-    <h1 class="text-3xl font-bold">Activity Log</h1>
-    <p class="text-slate-600">
+  <header class="space-y-3">
+    <h1 class="text-3xl font-bold text-slate-900">Activity Log</h1>
+    <p class="text-sm text-slate-600">
       Review recent actions across the portal. Use the filters to narrow the
       results and HTMX will update the list automatically.
     </p>
@@ -12,7 +12,7 @@
 
   <form
     id="activity-log-filter"
-    class="grid gap-4 rounded-xl bg-white p-4 shadow md:grid-cols-4"
+    class="grid gap-4 rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200 md:grid-cols-4"
     hx-get="{{ request.url_for('activity_log_entries') }}"
     hx-include="#activity-log-filter"
     hx-target="#activity-log-results"
@@ -20,14 +20,14 @@
     hx-vals='{"page": 1}'
     hx-push-url="true"
   >
-    <div class="space-y-1">
-      <label for="activity-action" class="text-sm font-medium text-slate-700">
+    <div class="space-y-2">
+      <label for="activity-action" class="text-xs font-semibold uppercase tracking-wide text-slate-500">
         Action
       </label>
       <select
         id="activity-action"
         name="action"
-        class="w-full rounded border border-slate-300 p-2"
+        class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-200"
       >
         <option value="">All actions</option>
         {% for action in action_options %}
@@ -38,14 +38,14 @@
       </select>
     </div>
 
-    <div class="space-y-1">
-      <label for="activity-entity" class="text-sm font-medium text-slate-700">
+    <div class="space-y-2">
+      <label for="activity-entity" class="text-xs font-semibold uppercase tracking-wide text-slate-500">
         Entity type
       </label>
       <select
         id="activity-entity"
         name="entity_type"
-        class="w-full rounded border border-slate-300 p-2"
+        class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-200"
       >
         <option value="">All entities</option>
         {% for entity_type in entity_type_options %}
@@ -56,14 +56,14 @@
       </select>
     </div>
 
-    <div class="space-y-1">
-      <label for="activity-device" class="text-sm font-medium text-slate-700">
+    <div class="space-y-2">
+      <label for="activity-device" class="text-xs font-semibold uppercase tracking-wide text-slate-500">
         Device
       </label>
       <select
         id="activity-device"
         name="device_id"
-        class="w-full rounded border border-slate-300 p-2"
+        class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-200"
       >
         <option value="">All devices</option>
         {% for option in device_options %}
@@ -74,14 +74,14 @@
       </select>
     </div>
 
-    <div class="space-y-1">
-      <label for="activity-user" class="text-sm font-medium text-slate-700">
+    <div class="space-y-2">
+      <label for="activity-user" class="text-xs font-semibold uppercase tracking-wide text-slate-500">
         Actor user
       </label>
       <select
         id="activity-user"
         name="user_id"
-        class="w-full rounded border border-slate-300 p-2"
+        class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-200"
       >
         <option value="">All users</option>
         {% for option in user_options %}
@@ -92,16 +92,16 @@
       </select>
     </div>
 
-    <div class="md:col-span-4 flex items-end justify-between">
+    <div class="md:col-span-4 flex flex-col gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
       <button
         type="submit"
-        class="rounded bg-slate-900 px-4 py-2 font-semibold text-white shadow hover:bg-slate-700"
+        class="inline-flex items-center justify-center rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-700"
       >
         Apply filters
       </button>
       <a
         href="{{ request.url_for('activity_log') }}"
-        class="text-sm font-medium text-slate-600 hover:text-slate-900"
+        class="text-xs font-semibold uppercase tracking-wide text-slate-500 transition hover:text-slate-700"
       >
         Reset filters
       </a>

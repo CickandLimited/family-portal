@@ -23,7 +23,7 @@
   <div
     id="review-queue"
     hx-get="{{ request.url_for('queue_partial') }}"
-    hx-trigger="reviewQueueRefresh from:body"
+    hx-trigger="load, every 30s, reviewQueueRefresh from:body"
     hx-swap="innerHTML"
   >
     {% include "components/review_queue_items.html" %}
