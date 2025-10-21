@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Family Portal backup nightly
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+RandomizedDelaySec=30m
+Persistent=true
+Unit=family-portal-backup.service
+
+[Install]
+WantedBy=timers.target
