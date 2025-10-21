@@ -17,6 +17,7 @@ if TYPE_CHECKING:  # pragma: no cover - only used for type checking
     from .devices import Device
     from .plans import Plan
     from .users import User
+    from .xp import XPEvent
 
 
 class PlanDay(BaseModel, table=True):
@@ -91,6 +92,7 @@ class Subtask(BaseModel, table=True):
     )
     approvals: list["Approval"] = Relationship(back_populates="subtask")
     attachments: list["Attachment"] = Relationship(back_populates="subtask")
+    xp_events: list["XPEvent"] = Relationship(back_populates="subtask")
 
 
 class SubtaskSubmission(BaseModel, table=True):

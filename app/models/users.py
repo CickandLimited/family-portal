@@ -17,6 +17,7 @@ if TYPE_CHECKING:  # pragma: no cover - only used for type checking
     from .devices import Device
     from .plans import Plan
     from .tasks import SubtaskSubmission
+    from .xp import XPEvent
 
 
 class UserRole(str, Enum):
@@ -56,3 +57,4 @@ class User(BaseModel, table=True):
         back_populates="submitted_by_user"
     )
     activity_logs: list["ActivityLog"] = Relationship(back_populates="user")
+    xp_events: list["XPEvent"] = Relationship(back_populates="user")
