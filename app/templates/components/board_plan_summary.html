@@ -16,6 +16,21 @@
     <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Active plans</p>
     <p class="mt-2 text-3xl font-bold text-slate-900">{{ board.totals.active_plan_count }}</p>
     <p class="mt-1 text-xs text-slate-500">{{ board.totals.plan_count }} total plans</p>
+    {% set progress = board.totals.active_plan_progress %}
+    {% if progress.total_subtasks > 0 %}
+      <div class="mt-4 space-y-3">
+        {% with label="Subtasks approved", current=progress.approved_subtasks, target=progress.total_subtasks, percent=progress.percent, unit='tasks', size='sm' %}
+          {% include "components/progress_bar.html" %}
+        {% endwith %}
+        {% if progress.total_days > 0 %}
+          {% with label="Days unlocked", current=progress.completed_days, target=progress.total_days, percent=progress.day_percent, unit='days', size='sm' %}
+            {% include "components/progress_bar.html" %}
+          {% endwith %}
+        {% endif %}
+      </div>
+    {% else %}
+      <p class="mt-4 text-xs text-slate-500">Assign plans with subtasks to start tracking progress.</p>
+    {% endif %}
   </div>
   <div class="rounded-lg bg-white p-5 shadow-sm ring-1 ring-slate-200">
     <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Family XP</p>

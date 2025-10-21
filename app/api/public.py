@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections import defaultdict
 from datetime import datetime
 from typing import Any
@@ -16,14 +17,14 @@ from fastapi import (
     UploadFile,
     status,
 )
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import selectinload
 from sqlmodel import Session, select
 
 from app.core.config import settings
 from app.core.db import get_session
-from app.core.locking import refresh_plan_day_locks
+from app.core.locking import PlanProgress, ProgressCache, refresh_plan_day_locks
 from app.core.xp import calculate_user_total_xp, progress_for_total_xp, reason_label
 from app.models.attachments import Attachment
 from app.models.devices import Device
@@ -39,18 +40,43 @@ templates = Jinja2Templates(directory="app/templates")
 def _build_board_context(session: Session) -> dict:
     """Aggregate board data for rendering and HTMX partials."""
 
+    progress_cache = ProgressCache()
     users = session.exec(
         select(User)
         .where(User.is_active.is_(True))
         .options(selectinload(User.xp_events))
         .order_by(User.display_name)
     ).all()
-    plans = session.exec(select(Plan).order_by(Plan.created_at.desc())).all()
+    plan_stmt = (
+        select(Plan)
+        .order_by(Plan.created_at.desc())
+        .options(
+            selectinload(Plan.assignee),
+            selectinload(Plan.days).selectinload(PlanDay.subtasks),
+        )
+    )
+    plans = session.exec(plan_stmt).all()
     devices = session.exec(select(Device)).all()
 
     plans_by_user: dict[int, list[Plan]] = defaultdict(list)
     for plan in plans:
         plans_by_user[plan.assignee_user_id].append(plan)
+
+    active_approved = 0
+    active_total = 0
+    active_days_complete = 0
+    active_days_total = 0
+    plan_progress_map: dict[int, PlanProgress] = {}
+
+    for plan in plans:
+        progress = progress_cache.plan_progress(plan)
+        if plan.id is not None:
+            plan_progress_map[plan.id] = progress
+        if plan.status == PlanStatus.IN_PROGRESS:
+            active_approved += progress.approved_subtasks
+            active_total += progress.total_subtasks
+            active_days_complete += progress.completed_days
+            active_days_total += progress.total_days
 
     board_users: list[dict] = []
     family_total_xp = 0
@@ -84,12 +110,24 @@ def _build_board_context(session: Session) -> dict:
 
         current_plan: dict | None = None
         if most_recent_plan is not None:
+            plan_progress = plan_progress_map.get(most_recent_plan.id, None)
             current_plan = {
                 "id": most_recent_plan.id,
                 "title": most_recent_plan.title,
                 "status": most_recent_plan.status.value.replace("_", " ").title(),
                 "total_xp": most_recent_plan.total_xp,
+                "is_active": most_recent_plan.status == PlanStatus.IN_PROGRESS,
+                "progress": None,
             }
+            if plan_progress is not None:
+                current_plan["progress"] = {
+                    "percent": plan_progress.percent_complete,
+                    "approved_subtasks": plan_progress.approved_subtasks,
+                    "total_subtasks": plan_progress.total_subtasks,
+                    "completed_days": plan_progress.completed_days,
+                    "total_days": plan_progress.total_days,
+                    "day_percent": plan_progress.day_percent_complete,
+                }
 
         linked_devices = [device for device in devices if device.linked_user_id == user.id]
 
@@ -132,6 +170,18 @@ def _build_board_context(session: Session) -> dict:
         ),
         "device_count": len(devices),
         "family_total_xp": family_total_xp,
+        "active_plan_progress": {
+            "approved_subtasks": active_approved,
+            "total_subtasks": active_total,
+            "percent": 0
+            if active_total == 0
+            else round((active_approved / active_total) * 100),
+            "completed_days": active_days_complete,
+            "total_days": active_days_total,
+            "day_percent": 0
+            if active_days_total == 0
+            else round((active_days_complete / active_days_total) * 100),
+        },
     }
 
     return {
@@ -332,19 +382,51 @@ def _render_plan_page(
     return templates.TemplateResponse("plan.html", context, status_code=status_code)
 
 
+@router.get("/plan/{plan_id}/partials/progress", response_class=HTMLResponse)
+def plan_progress_partial(
+    plan_id: int, request: Request, session: Session = Depends(get_session)
+):
+    """Return the plan overview progress cards for HTMX updates."""
+
+    plan = _load_plan_for_render(session, plan_id)
+    plan_context = _build_plan_context(plan)
+    return templates.TemplateResponse(
+        "components/plan_progress_overview.html",
+        {
+            "request": request,
+            "plan": plan_context,
+        },
+    )
+
+
+@router.get("/plan/{plan_id}/partials/days", response_class=HTMLResponse)
+def plan_days_partial(
+    plan_id: int, request: Request, session: Session = Depends(get_session)
+):
+    """Return the rendered plan days list for HTMX updates."""
+
+    plan = _load_plan_for_render(session, plan_id)
+    plan_context = _build_plan_context(plan)
+    return templates.TemplateResponse(
+        "components/plan_day_list.html",
+        {
+            "request": request,
+            "plan": plan_context,
+        },
+    )
+
+
 def _build_plan_context(plan: Plan) -> dict[str, Any]:
+    progress_cache = ProgressCache()
     days = sorted(plan.days, key=lambda day: day.day_index)
 
     plan_attachments = [_attachment_context(attachment) for attachment in plan.attachments]
 
-    total_subtasks = 0
-    completed_subtasks = 0
     day_contexts: list[dict[str, Any]] = []
 
     for day in days:
         subtasks = sorted(day.subtasks, key=lambda subtask: subtask.order_index)
         subtask_contexts: list[dict[str, Any]] = []
-        day_completed = 0
 
         for subtask in subtasks:
             status_label = subtask.status.value.replace("_", " ").title()
@@ -356,12 +438,6 @@ def _build_plan_context(plan: Plan) -> dict[str, Any]:
             attachments = [
                 _attachment_context(attachment) for attachment in subtask.attachments
             ]
-
-            if subtask.status == SubtaskStatus.APPROVED:
-                day_completed += 1
-                completed_subtasks += 1
-
-            total_subtasks += 1
 
             subtask_contexts.append(
                 {
@@ -378,29 +454,27 @@ def _build_plan_context(plan: Plan) -> dict[str, Any]:
                 }
             )
 
-        day_total = len(subtasks)
-        day_complete = day_completed == day_total
-        progress_percent = 100 if day_total == 0 else round((day_completed / day_total) * 100)
-
+        day_progress = progress_cache.day_progress(day)
         day_contexts.append(
             {
                 "id": day.id,
                 "index": day.day_index,
                 "title": day.title,
                 "locked": day.locked,
-                "complete": day_complete,
-                "progress_percent": progress_percent,
-                "completed_subtasks": day_completed,
-                "total_subtasks": day_total,
+                "complete": day_progress.is_complete,
+                "progress_percent": day_progress.percent_complete,
+                "completed_subtasks": day_progress.approved_subtasks,
+                "total_subtasks": day_progress.total_subtasks,
+                "progress": {
+                    "percent": day_progress.percent_complete,
+                    "approved_subtasks": day_progress.approved_subtasks,
+                    "total_subtasks": day_progress.total_subtasks,
+                },
                 "subtasks": subtask_contexts,
             }
         )
 
-    completed_days = sum(1 for day in day_contexts if day["complete"])
-    total_days = len(day_contexts)
-    progress_percent = 0
-    if total_subtasks:
-        progress_percent = round((completed_subtasks / total_subtasks) * 100)
+    plan_progress = progress_cache.plan_progress(plan)
 
     assignee = None
     if plan.assignee:
@@ -420,11 +494,19 @@ def _build_plan_context(plan: Plan) -> dict[str, Any]:
         "assignee": assignee,
         "attachments": plan_attachments,
         "days": day_contexts,
-        "completed_days": completed_days,
-        "total_days": total_days,
-        "completed_subtasks": completed_subtasks,
-        "total_subtasks": total_subtasks,
-        "progress_percent": progress_percent,
+        "completed_days": plan_progress.completed_days,
+        "total_days": plan_progress.total_days,
+        "completed_subtasks": plan_progress.approved_subtasks,
+        "total_subtasks": plan_progress.total_subtasks,
+        "progress_percent": plan_progress.percent_complete,
+        "progress": {
+            "percent": plan_progress.percent_complete,
+            "approved_subtasks": plan_progress.approved_subtasks,
+            "total_subtasks": plan_progress.total_subtasks,
+            "completed_days": plan_progress.completed_days,
+            "total_days": plan_progress.total_days,
+            "day_percent": plan_progress.day_percent_complete,
+        },
         "updated_at": plan.updated_at,
     }
 
@@ -456,6 +538,21 @@ async def submit_subtask(
 
     trimmed_comment = (comment or "").strip()
     submitted_user: User | None = None
+
+    def _submission_error(errors: list[str], form_state: dict[str, Any]):
+        if _is_htmx_request(request):
+            payload = {"errors": errors, "form": form_state}
+            return JSONResponse(payload, status_code=status.HTTP_400_BAD_REQUEST)
+        return _render_plan_page(
+            request,
+            session,
+            plan,
+            status_code=status.HTTP_400_BAD_REQUEST,
+            active_modal="submit",
+            active_subtask_id=subtask_id,
+            submission_errors=errors,
+            submission_form=form_state,
+        )
     if user_id:
         try:
             parsed_user_id = int(user_id)
@@ -468,16 +565,7 @@ async def submit_subtask(
                 "user_id": user_id or "",
                 "subtask_id": subtask_id,
             }
-            return _render_plan_page(
-                request,
-                session,
-                plan,
-                status_code=status.HTTP_400_BAD_REQUEST,
-                active_modal="submit",
-                active_subtask_id=subtask_id,
-                submission_errors=submission_errors,
-                submission_form=form_state,
-            )
+            return _submission_error(submission_errors, form_state)
 
         submitted_user = session.get(User, parsed_user_id)
         if submitted_user is None or not submitted_user.is_active:
@@ -487,16 +575,7 @@ async def submit_subtask(
                 "user_id": user_id or "",
                 "subtask_id": subtask_id,
             }
-            return _render_plan_page(
-                request,
-                session,
-                plan,
-                status_code=status.HTTP_400_BAD_REQUEST,
-                active_modal="submit",
-                active_subtask_id=subtask_id,
-                submission_errors=submission_errors,
-                submission_form=form_state,
-            )
+            return _submission_error(submission_errors, form_state)
 
     subtask_stmt = (
         select(Subtask)
@@ -531,16 +610,7 @@ async def submit_subtask(
             "user_id": user_id or "",
             "subtask_id": subtask_id,
         }
-        return _render_plan_page(
-            request,
-            session,
-            plan,
-            status_code=status.HTTP_400_BAD_REQUEST,
-            active_modal="submit",
-            active_subtask_id=subtask_id,
-            submission_errors=errors,
-            submission_form=form_state,
-        )
+        return _submission_error(errors, form_state)
 
     try:
         saved = await process_image(photo)
@@ -550,17 +620,11 @@ async def submit_subtask(
             "user_id": user_id or "",
             "subtask_id": subtask_id,
         }
-        return _render_plan_page(
-            request,
-            session,
-            plan,
-            status_code=status.HTTP_400_BAD_REQUEST,
-            active_modal="submit",
-            active_subtask_id=subtask_id,
-            submission_errors=[
+        return _submission_error(
+            [
                 "We couldn't process that photo. Please try again with a different image."
             ],
-            submission_form=form_state,
+            form_state,
         )
 
     now = datetime.utcnow()
@@ -591,6 +655,17 @@ async def submit_subtask(
     session.add(subtask)
     session.add(plan)
     session.commit()
+
+    if _is_htmx_request(request):
+        trigger_payload = {
+            "planProgressUpdated": {
+                "plan_id": plan.id,
+                "day_id": getattr(subtask.plan_day, "id", None),
+            }
+        }
+        response = Response(status_code=status.HTTP_204_NO_CONTENT)
+        response.headers["HX-Trigger"] = json.dumps(trigger_payload)
+        return response
 
     redirect_url = request.url_for("view_plan", plan_id=str(plan_id))
     return RedirectResponse(redirect_url, status_code=status.HTTP_303_SEE_OTHER)

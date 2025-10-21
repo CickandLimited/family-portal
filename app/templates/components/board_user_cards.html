@@ -25,6 +25,23 @@
           <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Current plan</p>
           <p class="mt-1 text-sm font-semibold text-slate-900">{{ member.active_plan.title }}</p>
           <p class="text-xs text-slate-500">{{ member.active_plan.status }} • {{ member.active_plan.total_xp }} XP total</p>
+          {% if member.active_plan.progress %}
+            {% set plan_progress = member.active_plan.progress %}
+            {% if plan_progress.total_subtasks > 0 %}
+              <div class="mt-3 space-y-2">
+                {% with label="Plan progress", current=plan_progress.approved_subtasks, target=plan_progress.total_subtasks, percent=plan_progress.percent, unit='tasks', size='sm' %}
+                  {% include "components/progress_bar.html" %}
+                {% endwith %}
+                {% if plan_progress.total_days > 0 %}
+                  <p class="text-[11px] text-slate-500">
+                    {{ plan_progress.completed_days }} of {{ plan_progress.total_days }} days complete
+                  </p>
+                {% endif %}
+              </div>
+            {% else %}
+              <p class="mt-3 text-xs text-slate-500">No subtasks scheduled for this plan yet.</p>
+            {% endif %}
+          {% endif %}
         {% else %}
           <p class="text-sm text-slate-600">
             No plan assigned yet. Import a plan from the admin tools to get {{ member.display_name }} started.

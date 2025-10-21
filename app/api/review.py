@@ -5,13 +5,16 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Iterable
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
+import json
+
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, Response, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import selectinload
 from sqlmodel import Session, select
 
 from app.core.db import get_session
+from app.core.locking import ProgressCache
 from app.core.locking import refresh_plan_day_locks
 from app.core.xp import (
     DAY_COMPLETION_BONUS,
@@ -60,6 +63,12 @@ def _subtask_review_statement():
     """Return a select statement with eager-load configuration for reviews."""
 
     return select(Subtask).options(*_REVIEW_LOAD_OPTIONS)
+
+
+def _is_htmx_request(request: Request) -> bool:
+    """Return ``True`` when the incoming request originates from HTMX."""
+
+    return request.headers.get("HX-Request") == "true"
 
 
 def _resolve_request_actor(
@@ -176,6 +185,7 @@ def _build_queue_item(
     *,
     acting_user: User | None,
     acting_device: Device | None,
+    progress_cache: ProgressCache,
 ) -> dict[str, Any] | None:
     """Return a dictionary describing the queue entry for ``subtask``."""
 
@@ -192,6 +202,9 @@ def _build_queue_item(
         subtask, acting_user=acting_user, acting_device=acting_device
     )
 
+    plan_progress = progress_cache.plan_progress(plan)
+    day_progress = progress_cache.day_progress(plan_day)
+
     return {
         "subtask_id": subtask.id,
         "subtask_text": subtask.text,
@@ -204,14 +217,29 @@ def _build_queue_item(
         "latest_submission": _submission_context(submission),
         "approval_allowed": allow,
         "approval_message": message,
+        "plan_progress": {
+            "percent": plan_progress.percent_complete,
+            "approved_subtasks": plan_progress.approved_subtasks,
+            "total_subtasks": plan_progress.total_subtasks,
+            "completed_days": plan_progress.completed_days,
+            "total_days": plan_progress.total_days,
+            "day_percent": plan_progress.day_percent_complete,
+        },
+        "day_progress": {
+            "percent": day_progress.percent_complete,
+            "approved_subtasks": day_progress.approved_subtasks,
+            "total_subtasks": day_progress.total_subtasks,
+        },
     }
 
 
-@router.get("", response_class=HTMLResponse)
-def queue(request: Request, session: Session = Depends(get_session)):
-    """Render the pending review queue."""
-
-    acting_device, acting_user = _resolve_request_actor(session, request)
+def _queue_items(
+    session: Session,
+    *,
+    acting_user: User | None,
+    acting_device: Device | None,
+) -> list[dict[str, Any]]:
+    """Return queue item dictionaries for pending subtasks."""
 
     stmt = (
         _subtask_review_statement()
@@ -221,12 +249,30 @@ def queue(request: Request, session: Session = Depends(get_session)):
     subtasks = session.exec(stmt).all()
 
     items: list[dict[str, Any]] = []
+    progress_cache = ProgressCache()
+
     for subtask in subtasks:
         item = _build_queue_item(
-            subtask, acting_user=acting_user, acting_device=acting_device
+            subtask,
+            acting_user=acting_user,
+            acting_device=acting_device,
+            progress_cache=progress_cache,
         )
         if item:
             items.append(item)
+
+    return items
+
+
+@router.get("", response_class=HTMLResponse)
+def queue(request: Request, session: Session = Depends(get_session)):
+    """Render the pending review queue."""
+
+    acting_device, acting_user = _resolve_request_actor(session, request)
+
+    items = _queue_items(
+        session, acting_user=acting_user, acting_device=acting_device
+    )
 
     context = {
         "request": request,
@@ -237,6 +283,26 @@ def queue(request: Request, session: Session = Depends(get_session)):
     }
 
     return templates.TemplateResponse("review.html", context)
+
+
+@router.get("/partials/queue", response_class=HTMLResponse)
+def queue_partial(request: Request, session: Session = Depends(get_session)):
+    """Return the queue list fragment for HTMX updates."""
+
+    acting_device, acting_user = _resolve_request_actor(session, request)
+    items = _queue_items(
+        session, acting_user=acting_user, acting_device=acting_device
+    )
+
+    context = {
+        "request": request,
+        "items": items,
+        "mood_options": MOOD_OPTIONS,
+        "default_mood": ApprovalMood.NEUTRAL.value,
+        "device": _device_context(acting_device),
+    }
+
+    return templates.TemplateResponse("components/review_queue_items.html", context)
 
 
 def _require_submission(
@@ -402,6 +468,18 @@ def approve(
 
     session.commit()
 
+    if _is_htmx_request(request):
+        trigger_payload = {
+            "reviewQueueRefresh": True,
+            "planProgressUpdated": {
+                "plan_id": plan.id,
+                "day_id": getattr(plan_day, "id", None),
+            },
+        }
+        response = Response(status_code=status.HTTP_204_NO_CONTENT)
+        response.headers["HX-Trigger"] = json.dumps(trigger_payload)
+        return response
+
     return RedirectResponse(url=router.url_path_for("queue"), status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -486,5 +564,17 @@ def deny(
     )
 
     session.commit()
+
+    if _is_htmx_request(request):
+        trigger_payload = {
+            "reviewQueueRefresh": True,
+            "planProgressUpdated": {
+                "plan_id": plan.id,
+                "day_id": getattr(plan_day, "id", None),
+            },
+        }
+        response = Response(status_code=status.HTTP_204_NO_CONTENT)
+        response.headers["HX-Trigger"] = json.dumps(trigger_payload)
+        return response
 
     return RedirectResponse(url=router.url_path_for("queue"), status_code=status.HTTP_303_SEE_OTHER)
