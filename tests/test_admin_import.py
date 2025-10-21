@@ -142,7 +142,9 @@ def test_admin_import_failure_logs_activity(
     client: TestClient, session: StubSession, monkeypatch: pytest.MonkeyPatch
 ):
     def fake_import(content: str, assignee_user_id: int, db_session: Session) -> int:
-        raise ValueError("Markdown plan is empty.")
+        raise ValueError(
+            "Day headings must be sequential starting at 1; expected Day 2, found Day 1."
+        )
 
     monkeypatch.setattr(admin_module, "import_markdown_plan", fake_import)
     monkeypatch.setattr(admin_module, "log_activity", log_activity_stub)
@@ -155,7 +157,9 @@ def test_admin_import_failure_logs_activity(
 
     assert response.status_code == 400
     body = response.json()
-    assert body == {"detail": "Markdown plan is empty."}
+    assert body == {
+        "detail": "Day headings must be sequential starting at 1; expected Day 2, found Day 1."
+    }
 
     assert session.rollbacks == 1
     assert session.commits == 1
@@ -168,5 +172,35 @@ def test_admin_import_failure_logs_activity(
     assert log.metadata == {
         "filename": "bad.md",
         "assignee_user_id": 5,
-        "error": "Markdown plan is empty.",
+        "error": "Day headings must be sequential starting at 1; expected Day 2, found Day 1.",
+    }
+
+
+def test_admin_import_rejects_non_utf8_file(
+    client: TestClient, session: StubSession, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(admin_module, "log_activity", log_activity_stub)
+
+    response = client.post(
+        "/admin/import",
+        data={"assignee_user_id": "3"},
+        files={"file": ("binary.md", b"\xff\xfe", "text/markdown")},
+    )
+
+    assert response.status_code == 400
+    body = response.json()
+    assert body == {"detail": "Uploaded file must be valid UTF-8 text."}
+
+    assert session.rollbacks == 1
+    assert session.commits == 1
+    assert len(session.added) == 1
+    log = session.added[0]
+    assert isinstance(log, ActivityLogStub)
+    assert log.action == "plan.import_failed"
+    assert log.entity_type == "plan"
+    assert log.entity_id == 0
+    assert log.metadata == {
+        "filename": "binary.md",
+        "assignee_user_id": 3,
+        "error": "Uploaded file must be valid UTF-8 text.",
     }
