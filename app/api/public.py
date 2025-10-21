@@ -21,10 +21,10 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import selectinload
 from sqlmodel import Session, select
 
+from app.core.config import settings
 from app.core.db import get_session
 from app.core.locking import refresh_plan_day_locks
-from app.core.config import settings
-from app.core.xp import calculate_level
+from app.core.xp import calculate_user_total_xp, progress_for_total_xp, reason_label
 from app.models.attachments import Attachment
 from app.models.devices import Device
 from app.models.plans import Plan, PlanStatus
@@ -40,7 +40,10 @@ def _build_board_context(session: Session) -> dict:
     """Aggregate board data for rendering and HTMX partials."""
 
     users = session.exec(
-        select(User).where(User.is_active.is_(True)).order_by(User.display_name)
+        select(User)
+        .where(User.is_active.is_(True))
+        .options(selectinload(User.xp_events))
+        .order_by(User.display_name)
     ).all()
     plans = session.exec(select(Plan).order_by(Plan.created_at.desc())).all()
     devices = session.exec(select(Device)).all()
@@ -57,16 +60,15 @@ def _build_board_context(session: Session) -> dict:
         active_plans = [plan for plan in user_plans if plan.status == PlanStatus.IN_PROGRESS]
         completed_plans = [plan for plan in user_plans if plan.status == PlanStatus.COMPLETE]
 
-        total_xp = sum(plan.total_xp for plan in user_plans)
+        xp_events = sorted(user.xp_events, key=lambda event: event.created_at, reverse=True)
+        total_xp = calculate_user_total_xp(xp_events)
         family_total_xp += total_xp
 
-        level = calculate_level(total_xp)
-        xp_into_level = total_xp - (level * 100)
-        xp_into_level = max(0, xp_into_level)
-        xp_to_next_level = 100 - xp_into_level if total_xp > 0 or xp_into_level > 0 else 100
-        progress_percent = (
-            0 if xp_into_level <= 0 else min(100, round((xp_into_level / 100) * 100))
-        )
+        progress = progress_for_total_xp(total_xp)
+        level = progress.level
+        xp_into_level = progress.xp_into_level
+        xp_to_next_level = progress.xp_to_next_level
+        progress_percent = progress.progress_percent
 
         most_recent_plan: Plan | None = None
         if active_plans:
@@ -108,6 +110,15 @@ def _build_board_context(session: Session) -> dict:
                     "completed": len(completed_plans),
                 },
                 "device_count": len(linked_devices),
+                "xp_history": [
+                    {
+                        "reason": event.reason,
+                        "label": reason_label(event.reason),
+                        "delta": event.delta,
+                        "created_at": event.created_at,
+                    }
+                    for event in xp_events[:5]
+                ],
             }
         )
 
