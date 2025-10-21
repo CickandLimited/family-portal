@@ -1,8 +1,160 @@
 {% extends "base.html" %}
 
 {% block content %}
-<section class="space-y-4">
-  <h1 class="text-3xl font-bold">Import Plan</h1>
-  <p class="text-slate-600">Upload Markdown plans from this page.</p>
+<section class="space-y-6" x-data="planImport()">
+  <style>
+    [x-cloak] {
+      display: none !important;
+    }
+  </style>
+  <header class="space-y-3">
+    <h1 class="text-3xl font-bold text-slate-900">Import Plan</h1>
+    <p class="text-sm text-slate-600">
+      Upload a Markdown plan file and choose the family member who should receive it. The XP totals and progress dashboards will refresh automatically after the import completes.
+    </p>
+  </header>
+
+  <div class="grid gap-6 lg:grid-cols-[2fr,1fr]">
+    <form
+      id="plan-import-form"
+      class="space-y-5 rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200"
+      hx-post="{{ request.url_for('import_md') }}"
+      hx-encoding="multipart/form-data"
+      hx-swap="none"
+      hx-on::before-request="submitting = true"
+      hx-on::after-request="handleResponse($event)"
+    >
+      <div class="space-y-2">
+        <label for="assignee" class="text-xs font-semibold uppercase tracking-wide text-slate-500">
+          Assign to
+        </label>
+        <select
+          id="assignee"
+          name="assignee_user_id"
+          class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+          required
+        >
+          <option value="" disabled selected>Select a family member</option>
+          {% for user in users | default([]) %}
+            <option value="{{ user.id }}">{{ user.display_name }}</option>
+          {% endfor %}
+        </select>
+        {% if not users %}
+          <p class="text-xs text-amber-600">No family members available yet. Create a plan from the admin tools first.</p>
+        {% endif %}
+      </div>
+
+      <div class="space-y-2">
+        <label for="plan-file" class="text-xs font-semibold uppercase tracking-wide text-slate-500">
+          Markdown file
+        </label>
+        <input
+          id="plan-file"
+          name="file"
+          type="file"
+          accept=".md,.markdown,text/markdown"
+          class="block w-full cursor-pointer rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-4 text-sm text-slate-700 transition hover:border-indigo-300 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+          required
+        />
+        <p class="text-xs text-slate-500">
+          Supported formats: UTF-8 Markdown with <code class="rounded bg-slate-100 px-1 py-0.5 text-[11px]">#</code> headings for days and tasks.
+        </p>
+      </div>
+
+      <div class="flex flex-col gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
+        <button
+          type="submit"
+          class="inline-flex items-center justify-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-70"
+          :disabled="submitting"
+        >
+          <span x-show="!submitting">Import plan</span>
+          <span x-cloak x-show="submitting" class="inline-flex items-center gap-2">
+            <svg class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle class="opacity-25" cx="12" cy="12" r="10"></circle>
+              <path class="opacity-75" d="M4 12a8 8 0 018-8" stroke-linecap="round"></path>
+            </svg>
+            Uploading...
+          </span>
+        </button>
+        <p class="text-xs text-slate-500">
+          Uploading triggers live updates for the board and plan dashboards via HTMX.
+        </p>
+      </div>
+    </form>
+
+    <aside class="space-y-4 rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
+      <h2 class="text-sm font-semibold text-slate-900">Import tips</h2>
+      <ul class="space-y-2 text-sm text-slate-600">
+        <li><strong>Headings</strong> become plan days. Use <code class="rounded bg-slate-100 px-1 py-0.5 text-[11px]">##</code> for subtasks.</li>
+        <li>Include XP values in parentheses, e.g. <code class="rounded bg-slate-100 px-1 py-0.5 text-[11px]">(50 XP)</code>.</li>
+        <li>After importing, review progress from the board or plan view—sections refresh without reloading.</li>
+      </ul>
+      <div
+        class="rounded-lg border p-4 text-sm"
+        :class="status.type === 'error' ? 'border-rose-200 bg-rose-50 text-rose-700' : status.type === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-50 text-slate-600'"
+        x-text="status.message"
+      ></div>
+    </aside>
+  </div>
 </section>
+<script>
+  function planImport() {
+    return {
+      submitting: false,
+      status: {
+        type: 'info',
+        message: 'Status updates will appear here once you submit the form.',
+      },
+      handleResponse(event) {
+        this.submitting = false;
+        const detail = event.detail;
+        if (!detail) {
+          return;
+        }
+        const { successful, failed, xhr } = detail;
+        if (successful) {
+          let response = null;
+          try {
+            response = JSON.parse(xhr.responseText || '{}');
+          } catch (err) {
+            response = null;
+          }
+          const planId =
+            response && response.plan_id !== undefined && response.plan_id !== null
+              ? String(response.plan_id)
+              : null;
+          this.status = {
+            type: 'success',
+            message: planId
+              ? `Plan imported successfully (ID ${planId}).`
+              : 'Plan imported successfully.',
+          };
+          event.target.reset?.();
+          htmx.trigger(document.body, 'planProgressUpdated', {
+            plan_id: planId,
+          });
+          return;
+        }
+
+        if (failed) {
+          let errorMessage = 'Upload failed. Check the file contents and try again.';
+          if (xhr?.responseText) {
+            try {
+              const payload = JSON.parse(xhr.responseText);
+              if (payload?.detail) {
+                errorMessage = payload.detail;
+              }
+            } catch (err) {
+              // ignore JSON parse errors
+            }
+          }
+          this.status = {
+            type: 'error',
+            message: errorMessage,
+          };
+        }
+      },
+    };
+  }
+</script>
 {% endblock %}
