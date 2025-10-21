@@ -248,8 +248,46 @@ TIMER
   log "Backup timer enabled."
 }
 
+sync_local_source() {
+  local source_dir="$1" dest_dir="$2"
+  if [[ "$source_dir" == "$dest_dir" ]]; then
+    log "Source and target directories are the same; skipping file sync."
+    return 0
+  fi
+
+  log "Copying application files from $source_dir to $dest_dir"
+  python3 - <<'PY' "$source_dir" "$dest_dir"
+import os
+import shutil
+import sys
+
+source_dir, dest_dir = sys.argv[1:3]
+
+os.makedirs(dest_dir, exist_ok=True)
+
+EXCLUDES = {
+    '.git',
+    '.venv',
+    '__pycache__',
+    '.mypy_cache',
+    '.pytest_cache',
+    'uploads',
+    'family_portal.db',
+}
+
+for entry in os.listdir(source_dir):
+    if entry in EXCLUDES:
+        continue
+    src_path = os.path.join(source_dir, entry)
+    dest_path = os.path.join(dest_dir, entry)
+    if os.path.isdir(src_path):
+        shutil.copytree(src_path, dest_path, dirs_exist_ok=True)
+    else:
+        shutil.copy2(src_path, dest_path)
+PY
+}
+
 main() {
-  require_cmd git
   require_cmd python3
   require_cmd apt-get
 
@@ -294,26 +332,47 @@ main() {
     run_privileged "$sudo_cmd" chown -R "$owner_user":"$owner_user" "$target_dir"
   fi
 
-  local repo_url
-  if git -C "$REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    repo_url=$(git -C "$REPO_ROOT" remote get-url origin 2>/dev/null || true)
+  local git_available=0
+  if command -v git >/dev/null 2>&1; then
+    git_available=1
+  else
+    log "git not found on PATH; proceeding without remote updates."
   fi
-  if [[ -z "$repo_url" ]]; then
-    read -rp "Repository URL to clone: " repo_url
-    if [[ -z "$repo_url" ]]; then
-      die "A repository URL is required."
-    fi
+
+  local repo_url=""
+  if [[ $git_available -eq 1 ]] && git -C "$REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    repo_url=$(git -C "$REPO_ROOT" remote get-url origin 2>/dev/null || true)
   fi
 
   if [[ -d "$target_dir/.git" ]]; then
-    log "Existing git repository detected. Pulling latest changes..."
-    git -C "$target_dir" pull --ff-only
-  else
-    if [[ -d "$target_dir" && -n $(ls -A "$target_dir" 2>/dev/null) ]]; then
-      die "Target directory $target_dir is not empty and not a git repository."
+    if [[ $git_available -eq 1 ]] && git -C "$target_dir" remote get-url origin >/dev/null 2>&1; then
+      log "Existing git repository detected. Pulling latest changes..."
+      git -C "$target_dir" pull --ff-only
+    else
+      log "Existing git directory without remote; syncing from local source."
+      sync_local_source "$REPO_ROOT" "$target_dir"
     fi
-    log "Cloning repository from $repo_url"
-    git clone "$repo_url" "$target_dir"
+  else
+    local has_contents=0
+    if [[ -d "$target_dir" && -n $(ls -A "$target_dir" 2>/dev/null) ]]; then
+      has_contents=1
+    fi
+
+    if [[ $has_contents -eq 1 ]]; then
+      if ask_yes_no "Target directory $target_dir already contains files. Overwrite with local source?" "y"; then
+        log "Overwriting existing files with local source."
+        sync_local_source "$REPO_ROOT" "$target_dir"
+      else
+        die "Aborting install at user request."
+      fi
+    else
+      if [[ -n "$repo_url" ]]; then
+        log "No existing checkout detected; using local source files."
+      else
+        log "No git remote information available; using local source files."
+      fi
+      sync_local_source "$REPO_ROOT" "$target_dir"
+    fi
   fi
 
   log "Ensuring virtual environment exists..."
