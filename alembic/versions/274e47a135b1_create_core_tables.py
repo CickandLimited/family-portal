@@ -211,6 +211,22 @@ def upgrade() -> None:
     )
 
     op.create_table(
+        "xp_event",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column("user_id", sa.Integer(), nullable=False),
+        sa.Column("subtask_id", sa.Integer(), nullable=True),
+        sa.Column("delta", sa.Integer(), nullable=False),
+        sa.Column("reason", sa.String(length=200), nullable=False),
+        sa.Column(
+            "created_at", sa.DateTime(), nullable=False, server_default=sa.func.now()
+        ),
+        sa.ForeignKeyConstraint(["user_id"], ["user.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["subtask_id"], ["subtask.id"], ondelete="SET NULL"),
+    )
+    op.create_index("ix_xp_event_user_id", "xp_event", ["user_id"], unique=False)
+    op.create_index("ix_xp_event_subtask_id", "xp_event", ["subtask_id"], unique=False)
+
+    op.create_table(
         "attachment",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("plan_id", sa.Integer(), nullable=True),
@@ -287,6 +303,10 @@ def downgrade() -> None:
     op.drop_index("ix_attachment_subtask_id", table_name="attachment")
     op.drop_index("ix_attachment_plan_id", table_name="attachment")
     op.drop_table("attachment")
+
+    op.drop_index("ix_xp_event_subtask_id", table_name="xp_event")
+    op.drop_index("ix_xp_event_user_id", table_name="xp_event")
+    op.drop_table("xp_event")
 
     op.drop_index("ix_approval_user_id", table_name="approval")
     op.drop_index("ix_approval_device_id", table_name="approval")
