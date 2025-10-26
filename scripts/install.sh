@@ -142,6 +142,87 @@ UNIT
   log "systemd service enabled."
 }
 
+perform_clean_install() {
+  local target_dir="$1" sudo_cmd="$2"
+  local env_file="$target_dir/.env"
+
+  log "Performing clean install cleanup"
+
+  local unit
+  for unit in family-portal.service family-portal-backup.service family-portal-backup.timer; do
+    log "Stopping $unit if running"
+    if run_privileged "$sudo_cmd" systemctl stop "$unit" >/dev/null 2>&1; then
+      log "Stopped $unit"
+    else
+      log "$unit not running or could not be stopped; continuing."
+    fi
+
+    log "Disabling $unit if enabled"
+    if run_privileged "$sudo_cmd" systemctl disable "$unit" >/dev/null 2>&1; then
+      log "Disabled $unit"
+    else
+      log "$unit not enabled or could not be disabled; continuing."
+    fi
+  done
+
+  local unit_path
+  for unit_path in \
+    "/etc/systemd/system/family-portal.service" \
+    "/etc/systemd/system/family-portal-backup.service" \
+    "/etc/systemd/system/family-portal-backup.timer"; do
+    if run_privileged "$sudo_cmd" test -e "$unit_path"; then
+      log "Removing systemd unit file $unit_path"
+      run_privileged "$sudo_cmd" rm -f "$unit_path"
+    else
+      log "Systemd unit file $unit_path not present; skipping."
+    fi
+  done
+
+  log "Reloading systemd configuration after cleanup"
+  if run_privileged "$sudo_cmd" systemctl daemon-reload >/dev/null 2>&1; then
+    log "systemd daemon reloaded."
+  else
+    log "systemd daemon-reload failed; please verify manually."
+  fi
+
+  if run_privileged "$sudo_cmd" test -f "$env_file"; then
+    log "Removing environment file $env_file"
+    run_privileged "$sudo_cmd" rm -f "$env_file"
+  else
+    log "Environment file $env_file not present; skipping."
+  fi
+
+  if [[ -z "$target_dir" || "$target_dir" == "/" ]]; then
+    log "Refusing to remove unsafe target directory path '$target_dir'."
+  elif run_privileged "$sudo_cmd" test -d "$target_dir"; then
+    log "Removing target directory $target_dir"
+    run_privileged "$sudo_cmd" rm -rf "$target_dir"
+  else
+    log "Target directory $target_dir not present; skipping."
+  fi
+
+  local data_dir
+  for data_dir in "/var/lib/family-portal" "/var/backups/family-portal"; do
+    if run_privileged "$sudo_cmd" test -d "$data_dir"; then
+      log "Removing directory $data_dir"
+      run_privileged "$sudo_cmd" rm -rf "$data_dir"
+    else
+      log "Directory $data_dir not present; skipping."
+    fi
+  done
+
+  if [[ -x "$SCRIPT_DIR/install_nginx_config.sh" ]]; then
+    log "Removing nginx configuration"
+    if run_privileged "$sudo_cmd" "$SCRIPT_DIR/install_nginx_config.sh" --remove; then
+      log "Nginx configuration cleanup complete."
+    else
+      log "Failed to remove nginx configuration; continuing."
+    fi
+  else
+    log "Nginx installer script not executable at $SCRIPT_DIR/install_nginx_config.sh; skipping nginx cleanup."
+  fi
+}
+
 configure_nginx_proxy() {
   local sudo_cmd="$1"
   local nginx_script="$SCRIPT_DIR/install_nginx_config.sh"
@@ -303,12 +384,16 @@ main() {
   fi
 
   log "Family Portal installer"
+  log "Select the clean install option to remove existing services, nginx configuration, and deployment directories before proceeding."
 
   local default_target="/opt/family-portal"
   local target_dir_input
   target_dir_input=$(prompt_with_default "Target installation directory" "$default_target")
   local target_dir
   target_dir=$(abspath "$target_dir_input")
+
+  local clean_install=0
+  ask_yes_no "Perform clean install first?" "n" && clean_install=1 || clean_install=0
 
   local session_secret
   session_secret=$(prompt_secret)
@@ -318,6 +403,12 @@ main() {
   ask_yes_no "Configure nginx reverse proxy?" "n" && configure_nginx=1 || configure_nginx=0
   ask_yes_no "Schedule nightly backups?" "y" && schedule_backups=1 || schedule_backups=0
   ask_yes_no "Run Alembic migrations now?" "y" && run_migrations=1 || run_migrations=0
+
+  if [[ ${clean_install:-0} -eq 1 ]]; then
+    perform_clean_install "$target_dir" "$sudo_cmd"
+  else
+    log "Skipping clean install cleanup."
+  fi
 
   log "Installing apt packages (python3-venv, libjpeg-dev, libwebp-dev, nginx)..."
   run_privileged "$sudo_cmd" apt-get update
