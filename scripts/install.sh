@@ -109,6 +109,7 @@ After=network.target
 Type=simple
 User=$service_user
 WorkingDirectory=$app_dir
+Environment="PATH=$app_dir/.venv/bin"
 EnvironmentFile=$env_file
 ExecStart=$uvicorn_exec app.main:app --host 0.0.0.0 --port 8080
 Restart=always
@@ -126,6 +127,7 @@ After=network.target
 Type=simple
 User=$service_user
 WorkingDirectory=$app_dir
+Environment="PATH=$app_dir/.venv/bin"
 EnvironmentFile=$env_file
 ExecStart=$uvicorn_exec app.main:app --host 0.0.0.0 --port 8080
 Restart=always
