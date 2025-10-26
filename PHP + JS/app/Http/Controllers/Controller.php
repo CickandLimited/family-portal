@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Services\ActivityLogger;
 use App\Services\Progress\ProgressService;
 use App\Services\XP\XPService;
+use Illuminate\Http\Request;
 
 abstract class Controller
 {
@@ -28,5 +29,10 @@ abstract class Controller
     protected function activityLogger(): ActivityLogger
     {
         return $this->activityLogger;
+    }
+
+    protected function isHtmx(Request $request): bool
+    {
+        return $request->headers->get('HX-Request') === 'true';
     }
 }
