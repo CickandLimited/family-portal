@@ -60,21 +60,38 @@
                 </div>
                 <ul class="space-y-2">
                     @foreach ($plan['attachments'] as $attachment)
-                        <li class="flex flex-col gap-2 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between">
-                            <div>
-                                <p class="font-medium text-slate-800">{{ $attachment['file_name'] }}</p>
-                                @if (!empty($attachment['uploaded_by']))
-                                    <p class="text-sm text-slate-500">Uploaded by {{ $attachment['uploaded_by'] }}</p>
+                        <li class="flex flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+                            <div class="min-w-0 space-y-1">
+                                <p class="truncate font-medium text-slate-800">{{ $attachment['file_name'] }}</p>
+                                @if (!empty($attachment['uploaded_by']) || !empty($attachment['created_display']))
+                                    <p class="text-xs text-slate-500">
+                                        @if (!empty($attachment['uploaded_by']))
+                                            Uploaded by <span class="font-medium text-slate-600">{{ $attachment['uploaded_by'] }}</span>
+                                        @endif
+                                        @if (!empty($attachment['uploaded_by']) && !empty($attachment['created_display']))
+                                            <span aria-hidden="true">•</span>
+                                        @endif
+                                        @if (!empty($attachment['created_display']))
+                                            {{ $attachment['created_display'] }}
+                                        @endif
+                                    </p>
                                 @endif
                             </div>
-                            <div class="flex items-center gap-3 text-sm">
+                            <div class="flex items-center gap-4 text-sm">
                                 <a
                                     class="font-semibold text-indigo-600 hover:text-indigo-500"
                                     href="{{ $attachment['file_path'] }}"
                                     target="_blank"
                                     rel="noopener"
                                 >
-                                    Open
+                                    View
+                                </a>
+                                <a
+                                    class="font-semibold text-indigo-600 hover:text-indigo-500"
+                                    href="{{ $attachment['file_path'] }}"
+                                    download="{{ $attachment['file_name'] }}"
+                                >
+                                    Download
                                 </a>
                             </div>
                         </li>

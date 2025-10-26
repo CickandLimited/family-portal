@@ -53,19 +53,38 @@
                 <h4 class="text-sm font-semibold text-slate-700">Attachments</h4>
                 <ul class="space-y-2 text-sm">
                     @foreach ($attachments as $attachment)
-                        <li class="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-slate-100 px-3 py-2">
-                            <span class="truncate text-slate-700">{{ $attachment['file_name'] ?? 'Attachment' }}</span>
-                            <div class="flex items-center gap-2 text-xs text-slate-500">
-                                @if (!empty($attachment['uploaded_by']))
-                                    <span>by {{ $attachment['uploaded_by'] }}</span>
+                        <li class="flex flex-col gap-2 rounded-xl bg-slate-100 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+                            <div class="min-w-0">
+                                <p class="truncate font-medium text-slate-700">{{ $attachment['file_name'] ?? 'Attachment' }}</p>
+                                @if (!empty($attachment['uploaded_by']) || !empty($attachment['created_display']))
+                                    <p class="mt-0.5 text-xs text-slate-500">
+                                        @if (!empty($attachment['uploaded_by']))
+                                            Uploaded by <span class="font-medium text-slate-600">{{ $attachment['uploaded_by'] }}</span>
+                                        @endif
+                                        @if (!empty($attachment['uploaded_by']) && !empty($attachment['created_display']))
+                                            <span aria-hidden="true">•</span>
+                                        @endif
+                                        @if (!empty($attachment['created_display']))
+                                            {{ $attachment['created_display'] }}
+                                        @endif
+                                    </p>
                                 @endif
+                            </div>
+                            <div class="flex items-center gap-3 text-xs text-slate-500 sm:text-sm">
                                 <a
                                     href="{{ $attachment['file_path'] ?? '#' }}"
                                     class="font-semibold text-indigo-600 hover:text-indigo-500"
                                     target="_blank"
                                     rel="noopener"
                                 >
-                                    Open
+                                    View
+                                </a>
+                                <a
+                                    href="{{ $attachment['file_path'] ?? '#' }}"
+                                    class="font-semibold text-indigo-600 hover:text-indigo-500"
+                                    download="{{ $attachment['file_name'] ?? 'attachment.webp' }}"
+                                >
+                                    Download
                                 </a>
                             </div>
                         </li>
