@@ -3,17 +3,12 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, TYPE_CHECKING
+from typing import Any
 
 from sqlalchemy import Column, ForeignKey, Integer, JSON, String
 from sqlmodel import Field, Relationship
 
 from .base import BaseModel
-
-if TYPE_CHECKING:  # pragma: no cover - only used for type checking
-    from .devices import Device
-    from .users import User
-
 
 class ActivityLog(BaseModel, table=True):
     """Represents an action recorded in the activity log."""

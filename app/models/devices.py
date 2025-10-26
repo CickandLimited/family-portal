@@ -3,20 +3,12 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from sqlalchemy import Column, ForeignKey, Integer
 from sqlmodel import Field, Relationship
 
 from .base import BaseModel
-
-if TYPE_CHECKING:  # pragma: no cover - only used for type checking
-    from .activity import ActivityLog
-    from .approvals import Approval
-    from .attachments import Attachment
-    from .tasks import SubtaskSubmission
-    from .users import User
 
 
 class Device(BaseModel, table=True):
