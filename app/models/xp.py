@@ -3,16 +3,10 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING
-
 from sqlalchemy import Column, ForeignKey, Integer, String
 from sqlmodel import Field, Relationship
 
 from .base import BaseModel
-
-if TYPE_CHECKING:  # pragma: no cover - only used for type checking
-    from .tasks import Subtask
-    from .users import User
 
 
 class XPEvent(BaseModel, table=True):
