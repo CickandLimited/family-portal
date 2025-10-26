@@ -13,6 +13,8 @@ class Device extends Model
 
     protected $table = 'device';
 
+    public const UPDATED_AT = null;
+
     protected $primaryKey = 'id';
 
     public $incrementing = false;
