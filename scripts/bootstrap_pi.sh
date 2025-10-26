@@ -13,6 +13,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 APP_DIR="/opt/family-portal"
 SERVICE_FILE="/etc/systemd/system/family-portal.service"
 UPLOAD_ROOT="/var/lib/family-portal"
+SERVICE_USER="${SERVICE_USER:-$USER}"
 
 # -------------------------------------
 # Update apt repositories and packages.
@@ -33,7 +34,7 @@ sudo apt-get install -y \
 # ------------------------------------------------------
 echo "[bootstrap] Preparing application directory at $APP_DIR..."
 sudo mkdir -p "$APP_DIR"
-sudo chown "$USER":"$USER" "$APP_DIR"
+sudo chown "$SERVICE_USER":"$SERVICE_USER" "$APP_DIR"
 
 # ----------------------------------------------------------------------
 # Synchronize the repository into /opt to keep deployment self-contained.
@@ -66,7 +67,7 @@ echo "[bootstrap] Installing Python dependencies..."
 # ------------------------------------------------
 echo "[bootstrap] Creating upload directories..."
 sudo mkdir -p "$UPLOAD_ROOT/uploads/thumbs"
-sudo chown -R "$USER":"$USER" "$UPLOAD_ROOT"
+sudo chown -R "$SERVICE_USER":"$SERVICE_USER" "$UPLOAD_ROOT"
 
 # -----------------------------------------------------------------
 # Initialize Alembic scaffolding if it has not been created before.
@@ -82,13 +83,13 @@ fi
 # Write the systemd unit exactly as defined in the project spec.
 # --------------------------------------------------------------
 echo "[bootstrap] Writing systemd service to $SERVICE_FILE..."
-sudo tee "$SERVICE_FILE" >/dev/null <<'UNIT'
+sudo tee "$SERVICE_FILE" >/dev/null <<UNIT
 [Unit]
 Description=Family Task Portal (Uvicorn)
 After=network.target
 
 [Service]
-User=%i
+User=${SERVICE_USER}
 WorkingDirectory=/opt/family-portal
 Environment=FP_SESSION_SECRET=change-me
 Environment=FP_DB_URL=sqlite:////opt/family-portal/family_portal.db
