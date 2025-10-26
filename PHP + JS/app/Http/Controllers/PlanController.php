@@ -12,9 +12,9 @@ use App\Models\Subtask;
 use App\Models\SubtaskSubmission;
 use App\Models\User;
 use App\Services\ActivityLogger;
+use App\Services\ImageProcessingException;
+use App\Services\ImageProcessor;
 use App\Services\Progress\ProgressService;
-use App\Services\Uploads\ImageStorageException;
-use App\Services\Uploads\ImageStorageService;
 use App\Services\XP\XPService;
 use Illuminate\Contracts\View\View as ViewContract;
 use Illuminate\Http\JsonResponse;
@@ -23,6 +23,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 
 final class PlanController extends Controller
@@ -31,7 +32,7 @@ final class PlanController extends Controller
         ProgressService $progressService,
         XPService $xpService,
         ActivityLogger $activityLogger,
-        private readonly ImageStorageService $imageStorage,
+        private readonly ImageProcessor $imageProcessor,
     ) {
         parent::__construct($progressService, $xpService, $activityLogger);
     }
@@ -137,22 +138,34 @@ final class PlanController extends Controller
         }
 
         $photo = $request->file('photo');
-        if ($photo === null || ! $photo->isValid()) {
-            $errors[] = 'Please attach a photo to submit evidence.';
-        } else {
-            $allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
-            if ($photo->getMimeType() !== null && ! in_array($photo->getMimeType(), $allowedTypes, true)) {
-                $errors[] = 'Please upload a JPEG, PNG, or WEBP image.';
-            }
+        $maxUploadMb = (int) config('family.max_upload_mb', 6);
+        $maxKilobytes = $maxUploadMb * 1024;
 
-            $maxBytes = (int) config('family.max_upload_mb', 6) * 1024 * 1024;
-            $size = $photo->getSize();
-            if ($size !== null && $size > $maxBytes) {
-                $errors[] = sprintf(
-                    'Photo is too large. Maximum allowed size is %d MB.',
-                    (int) config('family.max_upload_mb', 6)
-                );
-            }
+        $photoValidator = Validator::make(
+            ['photo' => $photo],
+            [
+                'photo' => [
+                    'required',
+                    'file',
+                    'uploaded',
+                    'mimetypes:image/jpeg,image/png,image/webp',
+                    'max:' . $maxKilobytes,
+                ],
+            ],
+            [
+                'photo.required' => 'Please attach a photo to submit evidence.',
+                'photo.file' => 'Please attach a photo to submit evidence.',
+                'photo.uploaded' => "We couldn't process that photo. Please try again.",
+                'photo.mimetypes' => 'Please upload a JPEG, PNG, or WEBP image.',
+                'photo.max' => sprintf('Photo is too large. Maximum allowed size is %d MB.', $maxUploadMb),
+            ]
+        );
+
+        if ($photoValidator->fails()) {
+            $errors = array_merge($errors, $photoValidator->errors()->all());
+        } else {
+            /** @var \Illuminate\Http\UploadedFile $photo */
+            $photo = $photoValidator->validated()['photo'];
         }
 
         if ($errors !== []) {
@@ -160,8 +173,8 @@ final class PlanController extends Controller
         }
 
         try {
-            $saved = $this->imageStorage->store($photo);
-        } catch (ImageStorageException $exception) {
+            $saved = $this->imageProcessor->process($photo);
+        } catch (ImageProcessingException $exception) {
             return $this->submissionErrorResponse(
                 $request,
                 $plan,
@@ -446,6 +459,11 @@ final class PlanController extends Controller
                 ?: 'Device ' . $attachment->uploadedByDevice->getKey();
         }
 
+        $createdDisplay = null;
+        if ($attachment->created_at instanceof Carbon) {
+            $createdDisplay = $attachment->created_at->copy()->utc()->format('M d, Y h:i A');
+        }
+
         return [
             'id' => $attachment->getKey(),
             'file_name' => basename((string) $attachment->file_path),
@@ -453,6 +471,7 @@ final class PlanController extends Controller
             'thumb_path' => $attachment->thumb_path,
             'uploaded_by' => $uploadedBy,
             'created_at' => $attachment->created_at,
+            'created_display' => $createdDisplay,
         ];
     }
 

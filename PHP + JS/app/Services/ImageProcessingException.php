@@ -1,10 +1,10 @@
 <?php
 
-namespace App\Services\Uploads;
+namespace App\Services;
 
 use RuntimeException;
 
-final class ImageStorageException extends RuntimeException
+final class ImageProcessingException extends RuntimeException
 {
     public function __construct(
         public readonly string $errorCode,
