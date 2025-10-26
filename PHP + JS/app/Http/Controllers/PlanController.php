@@ -27,20 +27,6 @@ use Illuminate\Support\Str;
 
 final class PlanController extends Controller
 {
-    private const PLAN_STATUS_BADGES = [
-        'draft' => 'bg-slate-200 text-slate-700',
-        'in_progress' => 'bg-blue-100 text-blue-700',
-        'complete' => 'bg-emerald-100 text-emerald-700',
-        'archived' => 'bg-slate-200 text-slate-600',
-    ];
-
-    private const SUBTASK_STATUS_BADGES = [
-        'pending' => 'bg-slate-200 text-slate-700',
-        'submitted' => 'bg-indigo-100 text-indigo-700',
-        'approved' => 'bg-emerald-100 text-emerald-700',
-        'denied' => 'bg-rose-100 text-rose-700',
-    ];
-
     public function __construct(
         ProgressService $progressService,
         XPService $xpService,
@@ -341,7 +327,7 @@ final class PlanController extends Controller
                     'xp_value' => (int) $subtask->xp_value,
                     'status' => $statusValue,
                     'status_label' => $statusLabel,
-                    'status_badge_class' => self::SUBTASK_STATUS_BADGES[$statusValue] ?? self::SUBTASK_STATUS_BADGES['pending'],
+                    'status_badge_class' => $this->subtaskStatusBadge($statusValue),
                     'submissions' => $submissions,
                     'attachments' => $attachments,
                     'can_submit' => in_array($subtask->status, [SubtaskStatus::PENDING, SubtaskStatus::DENIED], true),
@@ -387,7 +373,7 @@ final class PlanController extends Controller
             'title' => $plan->title,
             'status' => $statusValue,
             'status_label' => Str::title(str_replace('_', ' ', $statusValue)),
-            'status_badge_class' => self::PLAN_STATUS_BADGES[$statusValue] ?? self::PLAN_STATUS_BADGES['draft'],
+            'status_badge_class' => $this->planStatusBadge($statusValue),
             'total_xp' => (int) $plan->total_xp,
             'assignee' => $assignee,
             'attachments' => $planAttachments,
@@ -534,5 +520,29 @@ final class PlanController extends Controller
             ],
             $status
         );
+    }
+
+    private function planStatusBadge(string $status): string
+    {
+        /** @var array<string, string> $badges */
+        $badges = config('ui.status_badges.plan', []);
+
+        if (isset($badges[$status])) {
+            return $badges[$status];
+        }
+
+        return $badges['draft'] ?? 'bg-slate-200 text-slate-700';
+    }
+
+    private function subtaskStatusBadge(string $status): string
+    {
+        /** @var array<string, string> $badges */
+        $badges = config('ui.status_badges.subtask', []);
+
+        if (isset($badges[$status])) {
+            return $badges[$status];
+        }
+
+        return $badges['pending'] ?? 'bg-slate-200 text-slate-700';
     }
 }
