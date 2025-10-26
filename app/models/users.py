@@ -4,20 +4,9 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import TYPE_CHECKING
-
 from sqlmodel import Field, Relationship
 
 from .base import BaseModel
-
-if TYPE_CHECKING:  # pragma: no cover - only used for type checking
-    from .activity import ActivityLog
-    from .approvals import Approval
-    from .attachments import Attachment
-    from .devices import Device
-    from .plans import Plan
-    from .tasks import SubtaskSubmission
-    from .xp import XPEvent
 
 
 class UserRole(str, Enum):
