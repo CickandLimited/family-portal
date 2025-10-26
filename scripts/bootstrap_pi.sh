@@ -83,6 +83,9 @@ fi
 # Write the systemd unit exactly as defined in the project spec.
 # --------------------------------------------------------------
 echo "[bootstrap] Writing systemd service to $SERVICE_FILE..."
+# Operators must populate /opt/family-portal/.env with the required FP_* variables
+# (for example FP_SESSION_SECRET, FP_DB_URL, FP_UPLOADS_DIR, and FP_THUMBS_DIR)
+# before enabling this service.
 sudo tee "$SERVICE_FILE" >/dev/null <<UNIT
 [Unit]
 Description=Family Task Portal (Uvicorn)
@@ -91,10 +94,8 @@ After=network.target
 [Service]
 User=${SERVICE_USER}
 WorkingDirectory=/opt/family-portal
-Environment=FP_SESSION_SECRET=change-me
-Environment=FP_DB_URL=sqlite:////opt/family-portal/family_portal.db
-Environment=FP_UPLOADS_DIR=/var/lib/family-portal/uploads
-Environment=FP_THUMBS_DIR=/var/lib/family-portal/uploads/thumbs
+EnvironmentFile=/opt/family-portal/.env
+Environment="PATH=/opt/family-portal/.venv/bin"
 ExecStart=/opt/family-portal/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8080
 Restart=always
 
