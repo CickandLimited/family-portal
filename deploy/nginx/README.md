@@ -4,7 +4,7 @@ This directory contains an example `family-portal.conf` that can be used to serv
 
 ## Installing the configuration
 
-1. Ensure the application code is checked out at `/srv/family-portal` (or adjust the `alias` path in the config).
+1. Ensure the application code is checked out at `/opt/family-portal` (adjust the `alias` path if you install the app elsewhere) and that the backend service is reachable on port `8080`.
 2. Copy the configuration into `/etc/nginx/sites-available` and create the `sites-enabled` symlink.
 3. Reload Nginx.
 
@@ -15,6 +15,8 @@ sudo ./scripts/install_nginx_config.sh
 ```
 
 The script copies the configuration, creates/updates the symlink in `/etc/nginx/sites-enabled`, verifies the Nginx syntax (`nginx -t`), and reloads the service.
+
+Only one `default_server` should be active on the host. The provided `family-portal.conf` is designed to be that default server and assumes the application root lives at `/opt/family-portal` with static assets served from `app/static/`.
 
 If you prefer to perform the setup manually:
 
