@@ -4,6 +4,29 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+usage() {
+  cat <<'EOF'
+Usage: install.sh [options]
+
+Options:
+  --target <dir>           Target installation directory.
+  --session-secret <val>   Session secret to write to the environment file.
+  --clean-install          Remove existing services and files before installing.
+  --skip-clean-install     Skip clean install even if previously configured.
+  --enable-systemd         Install and enable the systemd service.
+  --disable-systemd        Skip systemd service installation.
+  --enable-nginx           Install nginx reverse proxy configuration.
+  --disable-nginx          Skip nginx configuration.
+  --enable-backups         Install and enable the backup timer.
+  --disable-backups        Skip backup timer installation.
+  --run-migrations         Run Alembic migrations after installation.
+  --skip-migrations        Do not run Alembic migrations.
+  --help                   Show this help message and exit.
+
+Without options the script will prompt interactively for these values.
+EOF
+}
+
 log() {
   printf '[installer] %s\n' "$*"
 }
@@ -371,6 +394,82 @@ PY
 }
 
 main() {
+  local target_dir_input="${INSTALL_TARGET_DIR:-}" session_secret_opt
+  session_secret_opt="${INSTALL_SESSION_SECRET:-${FP_SESSION_SECRET:-}}"
+  local clean_install_choice="" enable_systemd_choice="" configure_nginx_choice=""
+  local schedule_backups_choice="" run_migrations_choice=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --target)
+        [[ $# -lt 2 ]] && die "--target requires a directory argument"
+        target_dir_input="$2"
+        shift 2
+        ;;
+      --session-secret)
+        [[ $# -lt 2 ]] && die "--session-secret requires a value"
+        session_secret_opt="$2"
+        shift 2
+        ;;
+      --clean-install)
+        clean_install_choice=1
+        shift
+        ;;
+      --skip-clean-install)
+        clean_install_choice=0
+        shift
+        ;;
+      --enable-systemd)
+        enable_systemd_choice=1
+        shift
+        ;;
+      --disable-systemd)
+        enable_systemd_choice=0
+        shift
+        ;;
+      --enable-nginx)
+        configure_nginx_choice=1
+        shift
+        ;;
+      --disable-nginx)
+        configure_nginx_choice=0
+        shift
+        ;;
+      --enable-backups)
+        schedule_backups_choice=1
+        shift
+        ;;
+      --disable-backups)
+        schedule_backups_choice=0
+        shift
+        ;;
+      --run-migrations)
+        run_migrations_choice=1
+        shift
+        ;;
+      --skip-migrations)
+        run_migrations_choice=0
+        shift
+        ;;
+      --help)
+        usage
+        return 0
+        ;;
+      --*)
+        usage >&2
+        die "Unknown option: $1"
+        ;;
+      *)
+        break
+        ;;
+    esac
+  done
+
+  if [[ $# -gt 0 ]]; then
+    usage >&2
+    die "Unexpected argument: $1"
+  fi
+
   require_cmd python3
   require_cmd apt-get
 
@@ -387,22 +486,50 @@ main() {
   log "Select the clean install option to remove existing services, nginx configuration, and deployment directories before proceeding."
 
   local default_target="/opt/family-portal"
-  local target_dir_input
-  target_dir_input=$(prompt_with_default "Target installation directory" "$default_target")
+  if [[ -z "$target_dir_input" ]]; then
+    target_dir_input=$(prompt_with_default "Target installation directory" "$default_target")
+  fi
   local target_dir
   target_dir=$(abspath "$target_dir_input")
 
-  local clean_install=0
-  ask_yes_no "Perform clean install first?" "n" && clean_install=1 || clean_install=0
+  local clean_install
+  if [[ -z "$clean_install_choice" ]]; then
+    ask_yes_no "Perform clean install first?" "n" && clean_install=1 || clean_install=0
+  else
+    clean_install=$clean_install_choice
+  fi
 
   local session_secret
-  session_secret=$(prompt_secret)
+  if [[ -n "$session_secret_opt" ]]; then
+    session_secret="$session_secret_opt"
+  else
+    session_secret=$(prompt_secret)
+  fi
+  if [[ -z "$session_secret" ]]; then
+    die "Session secret must be provided."
+  fi
 
   local run_migrations enable_systemd configure_nginx schedule_backups
-  ask_yes_no "Install or update systemd service?" "y" && enable_systemd=1 || enable_systemd=0
-  ask_yes_no "Configure nginx reverse proxy?" "n" && configure_nginx=1 || configure_nginx=0
-  ask_yes_no "Schedule nightly backups?" "y" && schedule_backups=1 || schedule_backups=0
-  ask_yes_no "Run Alembic migrations now?" "y" && run_migrations=1 || run_migrations=0
+  if [[ -z "$enable_systemd_choice" ]]; then
+    ask_yes_no "Install or update systemd service?" "y" && enable_systemd=1 || enable_systemd=0
+  else
+    enable_systemd=$enable_systemd_choice
+  fi
+  if [[ -z "$configure_nginx_choice" ]]; then
+    ask_yes_no "Configure nginx reverse proxy?" "n" && configure_nginx=1 || configure_nginx=0
+  else
+    configure_nginx=$configure_nginx_choice
+  fi
+  if [[ -z "$schedule_backups_choice" ]]; then
+    ask_yes_no "Schedule nightly backups?" "y" && schedule_backups=1 || schedule_backups=0
+  else
+    schedule_backups=$schedule_backups_choice
+  fi
+  if [[ -z "$run_migrations_choice" ]]; then
+    ask_yes_no "Run Alembic migrations now?" "y" && run_migrations=1 || run_migrations=0
+  else
+    run_migrations=$run_migrations_choice
+  fi
 
   if [[ ${clean_install:-0} -eq 1 ]]; then
     perform_clean_install "$target_dir" "$sudo_cmd"
