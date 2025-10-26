@@ -6,6 +6,7 @@ use Illuminate\Support\ServiceProvider;
 use App\Services\ActivityLogger;
 use App\Services\Progress\ProgressCache;
 use App\Services\Progress\ProgressService;
+use App\Services\Uploads\ImageStorageService;
 use App\Services\XP\XPService;
 use Illuminate\Http\Request;
 
@@ -23,6 +24,13 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(XPService::class, fn () => new XPService());
 
         $this->app->scoped(ActivityLogger::class, fn ($app) => new ActivityLogger($app->make(Request::class)));
+
+        $this->app->singleton(ImageStorageService::class, function ($app) {
+            return new ImageStorageService(
+                (string) config('family.uploads_dir'),
+                (string) config('family.thumbs_dir')
+            );
+        });
     }
 
     /**

@@ -1,0 +1,72 @@
+@extends('layouts.app')
+
+@section('content')
+    <section class="space-y-6">
+        <div class="flex flex-wrap items-start justify-between gap-4">
+            <div>
+                <h1 class="text-3xl font-bold text-slate-900">Family Board</h1>
+                <p class="mt-1 text-sm text-slate-600">
+                    Track progress, XP, and plans for each family member in one place.
+                </p>
+            </div>
+            <a
+                class="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700"
+                href="{{ url('/admin/devices') }}"
+            >
+                Open admin tools
+            </a>
+        </div>
+
+        <div
+            class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"
+            hx-get="{{ route('board', ['partial' => 'plan-summary']) }}"
+            hx-trigger="load, every 30s"
+            hx-target="this"
+        >
+            @include('components.board-plan-summary', ['board' => $board])
+        </div>
+    </section>
+
+    <section class="mt-10 space-y-6">
+        <div class="flex flex-wrap items-center justify-between gap-4">
+            <div>
+                <h2 class="text-xl font-semibold text-slate-900">Family members</h2>
+                <p class="text-sm text-slate-500">
+                    XP totals and plan assignments refresh automatically.
+                </p>
+            </div>
+            <span class="text-xs uppercase tracking-wide text-slate-400">Refreshes every 45s</span>
+        </div>
+
+        <div
+            class="grid gap-6 sm:grid-cols-2 xl:grid-cols-3"
+            hx-get="{{ route('board', ['partial' => 'user-cards']) }}"
+            hx-trigger="load, every 45s"
+            hx-target="this"
+        >
+            @include('components.board-user-cards', ['board' => $board])
+        </div>
+    </section>
+
+    <section class="mt-12 rounded-lg bg-white p-6 shadow-sm ring-1 ring-slate-200">
+        <h2 class="text-xl font-semibold text-slate-900">Device recognition</h2>
+        @if ($device)
+            <p class="mt-3 text-sm text-slate-600">
+                You are browsing as device <span class="font-mono text-slate-900">{{ $device->getKey() }}</span>.
+                @if ($device->friendly_name)
+                    Saved name: <span class="font-semibold">{{ $device->friendly_name }}</span>.
+                @endif
+                @if ($device->linked_user_id)
+                    Linked family member ID: <span class="font-semibold">{{ $device->linked_user_id }}</span>.
+                @endif
+            </p>
+            <p class="mt-2 text-xs text-slate-500">
+                Last seen {{ optional($device->last_seen_at)->format('Y-m-d H:i:s') ?? 'recently' }} UTC.
+            </p>
+        @else
+            <p class="mt-3 text-sm text-slate-600">
+                We are assigning this browser a device ID. Refresh if nothing appears in a few seconds.
+            </p>
+        @endif
+    </section>
+@endsection
