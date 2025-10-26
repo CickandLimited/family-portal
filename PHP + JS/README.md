@@ -66,3 +66,13 @@ php artisan serve --host=0.0.0.0 --port=8000
 ```
 
 The application will be available at <http://localhost:8000>. Make sure the FastAPI service continues to manage shared resources such as the uploads directory under `/var/lib/family-portal/uploads`.
+
+## Testing
+
+Run the PHPUnit-powered Laravel test suite to validate the PHP implementation alongside the FastAPI stack:
+
+```bash
+php artisan test
+```
+
+Individual suites can be targeted with `--testsuite=Feature` or `--filter=` if you only need to run the new parity checks.
