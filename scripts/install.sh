@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+STAGED_SOURCE_DIR=""
+
+cleanup_staged_source() {
+  if [[ -n "${STAGED_SOURCE_DIR:-}" && -d "$STAGED_SOURCE_DIR" ]]; then
+    rm -rf "$STAGED_SOURCE_DIR"
+  fi
+}
+
+trap cleanup_staged_source EXIT
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
@@ -393,6 +403,20 @@ for entry in os.listdir(source_dir):
 PY
 }
 
+stage_source_directory() {
+  local repo_root="$1" target_dir="$2"
+  if [[ "$repo_root" == "$target_dir" || "$repo_root" == "$target_dir"/* ]]; then
+    local staging_dir
+    staging_dir=$(mktemp -d -t family-portal-src-XXXXXX)
+    log "Staging installer source from $repo_root to temporary directory $staging_dir"
+    sync_local_source "$repo_root" "$staging_dir"
+    STAGED_SOURCE_DIR="$staging_dir"
+    echo "$staging_dir"
+  else
+    echo "$repo_root"
+  fi
+}
+
 main() {
   local target_dir_input="${INSTALL_TARGET_DIR:-}" session_secret_opt
   session_secret_opt="${INSTALL_SESSION_SECRET:-${FP_SESSION_SECRET:-}}"
@@ -531,6 +555,11 @@ main() {
     run_migrations=$run_migrations_choice
   fi
 
+  local source_dir="$REPO_ROOT"
+  if [[ ${clean_install:-0} -eq 1 ]]; then
+    source_dir=$(stage_source_directory "$REPO_ROOT" "$target_dir")
+  fi
+
   if [[ ${clean_install:-0} -eq 1 ]]; then
     perform_clean_install "$target_dir" "$sudo_cmd"
   else
@@ -570,7 +599,7 @@ main() {
       git -C "$target_dir" pull --ff-only
     else
       log "Existing git directory without remote; syncing from local source."
-      sync_local_source "$REPO_ROOT" "$target_dir"
+      sync_local_source "$source_dir" "$target_dir"
     fi
   else
     local has_contents=0
@@ -581,7 +610,7 @@ main() {
     if [[ $has_contents -eq 1 ]]; then
       if ask_yes_no "Target directory $target_dir already contains files. Overwrite with local source?" "y"; then
         log "Overwriting existing files with local source."
-        sync_local_source "$REPO_ROOT" "$target_dir"
+        sync_local_source "$source_dir" "$target_dir"
       else
         die "Aborting install at user request."
       fi
@@ -591,7 +620,7 @@ main() {
       else
         log "No git remote information available; using local source files."
       fi
-      sync_local_source "$REPO_ROOT" "$target_dir"
+      sync_local_source "$source_dir" "$target_dir"
     fi
   fi
 
