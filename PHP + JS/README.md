@@ -76,3 +76,27 @@ php artisan test
 ```
 
 Individual suites can be targeted with `--testsuite=Feature` or `--filter=` if you only need to run the new parity checks.
+
+## Raspberry Pi deployment
+
+For a production-style deployment on a Raspberry Pi, the repository includes an automated installer that provisions the OS packages, MariaDB database, PHP runtime, frontend build assets, and nginx configuration in one step.
+
+From the repository root on the Pi, run:
+
+```bash
+bash scripts/deploy_laravel_pi.sh \
+  --db-name family_portal \
+  --db-user portal_user \
+  --db-pass 'super-secret-password' \
+  --session-secret 'paste-a-long-random-string'
+```
+
+Key behaviors:
+
+- The script installs nginx, PHP-FPM, Composer, Node.js, MariaDB, and all Laravel prerequisites via `apt-get` if they are not already present.
+- MariaDB is configured with the supplied database name, user, and password, and the generated credentials are written into the deployed `.env`.
+- Source code is built in place (`composer install --no-dev`, `npm ci`, `npm run build`) and then synchronized to `/var/www/family-portal` (overridable with `--app-root`).
+- Environment variables such as `FP_SESSION_SECRET`, `FP_UPLOADS_DIR`, and `FP_DB_URL` are generated automatically so the PHP layer matches the FastAPI stack.
+- nginx and PHP-FPM are reloaded to pick up configuration changes, and the deployment can be safely re-run without manual cleanup.
+
+If you prefer to provide the session secret via the environment instead of the command line, export `FP_SESSION_SECRET` before running the script. Additional overrides for the uploads directory (`FP_UPLOADS_DIR`) and thumbnail directory (`FP_THUMBS_DIR`) are also honored.
