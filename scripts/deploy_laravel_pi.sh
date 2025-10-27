@@ -113,7 +113,7 @@ fi
 
 log "Installing operating system prerequisites"
 run_sudo apt-get update
-run_sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+run_sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y \
   nginx php-fpm php-cli php-mysql php-sqlite3 php-gd php-xml php-curl php-zip \
   mariadb-server composer nodejs npm git rsync unzip jq
 
