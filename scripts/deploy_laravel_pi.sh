@@ -55,7 +55,7 @@ sql_escape() {
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-SOURCE_DIR="$(cd "$REPO_ROOT" && cd "PHP + JS" && pwd)"
+SOURCE_DIR="$(cd "$REPO_ROOT" && cd "laravel-app" && pwd)"
 
 APP_ROOT="/var/www/family-portal"
 DB_NAME=""
