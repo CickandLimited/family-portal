@@ -154,6 +154,14 @@ SQL
 log "Installing PHP dependencies"
 (
   cd "$SOURCE_DIR"
+  if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    if ! git config --global --get-all safe.directory 2>/dev/null | grep -Fx -- "$REPO_ROOT" >/dev/null 2>&1; then
+      git config --global --add safe.directory "$REPO_ROOT"
+    fi
+    if ! git config --global --get-all safe.directory 2>/dev/null | grep -Fx -- "$SOURCE_DIR" >/dev/null 2>&1; then
+      git config --global --add safe.directory "$SOURCE_DIR"
+    fi
+  fi
   COMPOSER_ALLOW_SUPERUSER=1 composer install --no-dev --optimize-autoloader --no-interaction
   npm ci
   npm run build
