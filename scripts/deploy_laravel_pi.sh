@@ -246,6 +246,9 @@ log "Syncing environment configuration"
 run_sudo install -m 640 -o www-data -g www-data "$ENV_TMP" "$APP_ROOT/.env"
 rm -f "$ENV_TMP"
 
+log "Setting ownership on deployment root"
+run_sudo chown -R www-data:www-data "$APP_ROOT"
+
 log "Generating application key"
 run_as_www_data bash -lc "cd '$APP_ROOT' && php artisan key:generate --force"
 
@@ -258,9 +261,6 @@ run_as_www_data bash -lc "cd '$APP_ROOT' && php artisan route:cache"
 
 log "Linking storage"
 run_as_www_data bash -lc "cd '$APP_ROOT' && php artisan storage:link"
-
-log "Setting ownership on deployment root"
-run_sudo chown -R www-data:www-data "$APP_ROOT"
 
 log "Configuring nginx"
 NGINX_CONF="/etc/nginx/sites-available/family-portal"
