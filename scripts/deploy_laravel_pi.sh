@@ -177,6 +177,10 @@ run_sudo rsync -a --delete \
   --exclude 'storage/logs/*.log' \
   "$SOURCE_DIR"/ "$APP_ROOT"/
 
+log "Setting initial permissions for storage and cache"
+run_sudo chown -R www-data:www-data "$APP_ROOT/storage" "$APP_ROOT/bootstrap/cache"
+run_sudo chmod -R ug+rwX "$APP_ROOT/storage" "$APP_ROOT/bootstrap/cache"
+
 log "Ensuring upload directories exist"
 run_sudo mkdir -p "$UPLOADS_DIR" "$THUMBS_DIR"
 run_sudo chown -R www-data:www-data "$UPLOADS_DIR" "$THUMBS_DIR"
