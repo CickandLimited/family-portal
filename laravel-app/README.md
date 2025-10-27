@@ -30,7 +30,11 @@ This project contains the Laravel implementation that complements the FastAPI se
    ```bash
    touch database/database.sqlite
    ```
-5. Run the framework migrations to bootstrap the schema:
+5. Ensure Laravel's writable directories are owned by your web user (or the current user when developing locally):
+   ```bash
+   chmod -R ug+rwX storage bootstrap/cache
+   ```
+6. Run the framework migrations to bootstrap the schema:
    ```bash
    php artisan migrate
    ```
